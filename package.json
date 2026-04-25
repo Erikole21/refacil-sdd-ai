@@ -1,0 +1,48 @@
+{
+  "name": "refacil-sdd-ai",
+  "version": "4.5.8",
+  "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor and OpenCode",
+  "bin": {
+    "refacil-sdd-ai": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "lib/opencode-plugin/",
+    "skills/",
+    "agents/",
+    "templates/",
+    "README.md",
+    "refacil-bus-diagrams.md"
+  ],
+  "keywords": [
+    "ai",
+    "development",
+    "methodology",
+    "claude-code",
+    "cursor",
+    "opencode",
+    "sdd",
+    "specification-driven",
+    "testing",
+    "code-review"
+  ],
+  "author": "Refacil",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Erikole21/refacil-sdd-ai"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/hooks.test.js test/installer.test.js test/ignore-files.test.js test/methodology-migration-pending.test.js test/sdd.test.js test/config.test.js test/refactor-integrar-openspec-nativo.test.js test/refactor-rutas-refacil-sdd.test.js test/refactor-agents-english.test.js test/remove-openspec-legacy.test.js test/find-project-root.test.js test/opencode-installer.test.js test/opencode-plugin.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@clack/prompts": "^0.9.0"
+  }
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>refacil-bus · vista en vivo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">●</span>
+      <h1>refacil-bus</h1>
+      <span class="tag">vista en vivo</span>
+    </div>
+    <div class="status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-label">conectando...</span>
+      <span id="port" class="muted"></span>
+    </div>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <div class="side-head">
+        <h2>Salas activas</h2>
+        <span id="rooms-count" class="pill">0</span>
+      </div>
+      <ul id="rooms-list"></ul>
+      <div class="side-foot">
+        <div class="stat"><span class="label">Mensajes recibidos</span><span id="msg-count" class="val">0</span></div>
+        <div class="stat"><span class="label">Pares ask/reply</span><span id="pair-count" class="val">0</span></div>
+        <div class="stat"><span class="label">Pendientes</span><span id="pending-count" class="val">0</span></div>
+      </div>
+    </aside>
+
+    <section id="feed">
+      <div class="feed-head">
+        <h2 id="feed-title">Todas las salas</h2>
+        <div class="feed-controls">
+          <label><input type="checkbox" id="filter-ask" checked> ask</label>
+          <label><input type="checkbox" id="filter-reply" checked> reply</label>
+          <label><input type="checkbox" id="filter-say" checked> say</label>
+          <label><input type="checkbox" id="filter-system" checked> system</label>
+          <button id="clear-btn" title="limpiar vista (no borra el historial)">limpiar</button>
+        </div>
+      </div>
+      <div id="feed-body">
+        <div id="feed-empty" class="empty">
+          Esperando mensajes... si tus sesiones están en una sala, deberían aparecer aquí cuando alguien envíe algo.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
