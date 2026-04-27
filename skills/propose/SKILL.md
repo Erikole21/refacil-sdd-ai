@@ -45,9 +45,14 @@ Communicate the final agreed slug to the user before generating.
 
 ### Step 2: Delegate to the refacil-proposer sub-agent
 
+Before delegating, resolve the artifact language:
+
+Run `refacil-sdd-ai sdd config --json` and read the `artifactLanguage` field. If the command fails or the field is missing/unknown, use `english`.
+
 Invoke the `refacil-proposer` sub-agent passing it:
 - `changeName`: the valid slug agreed in Step 1.5.
 - `description`: complete description of the change (from Step 1 or from `$ARGUMENTS`).
+- `artifactLanguage`: the resolved language (e.g. `english` or `spanish`). Pass it explicitly so the sub-agent uses it immediately, before it reads AGENTS.md.
 
 The sub-agent:
 - Explores the codebase (reads `AGENTS.md`, detects relevant files and conventions) before generating.

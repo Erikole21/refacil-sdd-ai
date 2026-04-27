@@ -841,11 +841,14 @@ describe('sdd config — CLI integration', () => {
     assert.equal(typeof parsed.baseBranch, 'string', 'baseBranch must be a string');
   });
 
-  test('CA-CONFIG-03: --json output does NOT contain sources field', () => {
+  test('CA-CONFIG-03: --json output contains sources field with level indicators', () => {
     const r = runSdd(tmpDir, 'config', ['--json']);
     assert.equal(r.status, 0);
     const parsed = JSON.parse(r.stdout.trim());
-    assert.ok(!('sources' in parsed), 'JSON output must not expose sources field');
+    assert.ok('sources' in parsed, 'JSON output must include sources field');
+    assert.ok(typeof parsed.sources === 'object' && parsed.sources !== null, 'sources must be an object');
+    assert.ok('artifactLanguage' in parsed.sources, 'sources must include artifactLanguage level');
+    assert.ok(['project', 'global', 'default'].includes(parsed.sources.artifactLanguage), `sources.artifactLanguage must be 'project', 'global', or 'default'. Got: ${parsed.sources.artifactLanguage}`);
   });
 
   test('CA-CONFIG-04: human-readable output contains source label in brackets', () => {

@@ -416,19 +416,22 @@ async function promptBranchConfig() {
   if (skipFlags.some((f) => process.argv.includes(f))) return;
   if (!process.stdout.isTTY) return;
 
-  const { readConfigFile, DEFAULT_PROTECTED_BRANCHES, DEFAULT_BASE_BRANCH } = require('../lib/config');
+  const { readConfigFile, DEFAULT_PROTECTED_BRANCHES, DEFAULT_BASE_BRANCH, SUPPORTED_LANGUAGES, DEFAULT_ARTIFACT_LANGUAGE } = require('../lib/config');
   const globalConfigPath = path.join(os.homedir(), '.refacil-sdd-ai', 'config.yaml');
   const globalConfig = readConfigFile(globalConfigPath) || {};
   const currentBaseBranch = (typeof globalConfig.baseBranch === 'string' && globalConfig.baseBranch.trim()) ? globalConfig.baseBranch.trim() : DEFAULT_BASE_BRANCH;
   const currentProtected = (Array.isArray(globalConfig.protectedBranches) && globalConfig.protectedBranches.length > 0) ? globalConfig.protectedBranches : DEFAULT_PROTECTED_BRANCHES;
+  const currentArtifactLanguage = (typeof globalConfig.artifactLanguage === 'string' && SUPPORTED_LANGUAGES.includes(globalConfig.artifactLanguage.trim())) ? globalConfig.artifactLanguage.trim() : DEFAULT_ARTIFACT_LANGUAGE;
 
   console.log('\n  Branch configuration (global, stored in ~/.refacil-sdd-ai/config.yaml)');
   console.log(`  Current base branch:        ${currentBaseBranch}`);
   console.log(`  Current protected branches: ${currentProtected.join(', ')}`);
+  console.log(`  Current artifact language:  ${currentArtifactLanguage}`);
   console.log('  Press Enter to keep current values, or type new ones.\n');
 
   let baseBranch;
   let protectedBranches;
+  let artifactLanguage;
 
   try {
     const clack = require('@clack/prompts');
@@ -455,8 +458,20 @@ async function promptBranchConfig() {
     }
     protectedBranches = parseBranchList((pbResult && pbResult.trim()) ? pbResult.trim() : currentProtected.join(', '), currentProtected);
 
+    const alResult = await clack.text({
+      message: `Artifact language — ${SUPPORTED_LANGUAGES.join(' | ')} (current: ${currentArtifactLanguage}):`,
+      placeholder: currentArtifactLanguage,
+      validate: () => undefined,
+    });
+    if (clack.isCancel(alResult)) {
+      console.log('  Branch config prompt cancelled. Keeping existing values.\n');
+      return;
+    }
+    const alRaw = (alResult && alResult.trim()) ? alResult.trim() : currentArtifactLanguage;
+    artifactLanguage = SUPPORTED_LANGUAGES.includes(alRaw) ? alRaw : currentArtifactLanguage;
+
     const confirm = await clack.confirm({
-      message: `Save global config — base: "${baseBranch}", protected: [${protectedBranches.join(', ')}]?`,
+      message: `Save global config — base: "${baseBranch}", protected: [${protectedBranches.join(', ')}], language: ${artifactLanguage}?`,
       initialValue: true,
     });
     if (clack.isCancel(confirm) || !confirm) {
@@ -475,7 +490,11 @@ async function promptBranchConfig() {
     const pbAnswer = await ask(`  Protected branches [${currentProtected.join(', ')}]: `);
     protectedBranches = parseBranchList((pbAnswer && pbAnswer.trim()) ? pbAnswer.trim() : currentProtected.join(', '), currentProtected);
 
-    const confirmAnswer = await ask(`  Save global config — base: "${baseBranch}", protected: [${protectedBranches.join(', ')}]? (Y/n): `);
+    const alAnswer = await ask(`  Artifact language [${currentArtifactLanguage}] (${SUPPORTED_LANGUAGES.join('/')}): `);
+    const alRaw = (alAnswer && alAnswer.trim()) ? alAnswer.trim() : currentArtifactLanguage;
+    artifactLanguage = SUPPORTED_LANGUAGES.includes(alRaw) ? alRaw : currentArtifactLanguage;
+
+    const confirmAnswer = await ask(`  Save global config — base: "${baseBranch}", protected: [${protectedBranches.join(', ')}], language: ${artifactLanguage}? (Y/n): `);
     rl.close();
     if (confirmAnswer.trim().toLowerCase() === 'n') {
       console.log('  Branch config not saved.\n');
@@ -483,19 +502,22 @@ async function promptBranchConfig() {
     }
   }
 
-  // Fix 2: pre-check to avoid process.exit(0) from cmdWriteConfig no-op path when called programmatically
+  // Pre-check to avoid process.exit(0) from cmdWriteConfig no-op path when called programmatically
   const valuesUnchanged = baseBranch === currentBaseBranch &&
-    JSON.stringify(protectedBranches.slice().sort()) === JSON.stringify(currentProtected.slice().sort());
+    JSON.stringify(protectedBranches.slice().sort()) === JSON.stringify(currentProtected.slice().sort()) &&
+    artifactLanguage === currentArtifactLanguage;
   if (valuesUnchanged) {
     console.log('  Branch config unchanged. Keeping existing values.\n');
     return;
   }
 
   // Build argv-style array and call cmdWriteConfig directly
+  // Only write artifactLanguage if user chose a non-default value
   const writeArgv = [
     '--global',
     '--base-branch', baseBranch,
     '--protected-branches', protectedBranches.join(','),
+    '--artifact-language', artifactLanguage,
   ];
   try {
     cmdWriteConfig(writeArgv, projectRoot);
@@ -798,6 +820,7 @@ function help() {
                       [--global]                    Write to ~/.refacil-sdd-ai/config.yaml (global level)
                       [--base-branch <branch>]      Base branch for new changes
                       [--protected-branches <csv>]  Protected branches (comma-separated)
+                      [--artifact-language <lang>]  Artifact language: english (default) or spanish
     clean         Remove skills and SDD-AI hooks from all detected IDEs
                   (.claude/settings.json, .cursor/hooks.json, .opencode/plugins/)
     help          Show this help

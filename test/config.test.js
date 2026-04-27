@@ -13,7 +13,7 @@ const os = require('node:os');
 // create the file at the path config.js resolves (~/.refacil-sdd-ai/config.yaml) and
 // clean up afterwards.
 
-const { loadBranchConfig, loadBranchConfigWithSources, DEFAULT_PROTECTED_BRANCHES, DEFAULT_BASE_BRANCH } = require('../lib/config');
+const { loadBranchConfig, loadBranchConfigWithSources, extractArtifactLanguage, DEFAULT_PROTECTED_BRANCHES, DEFAULT_BASE_BRANCH, SUPPORTED_LANGUAGES, DEFAULT_ARTIFACT_LANGUAGE } = require('../lib/config');
 
 // Helper: create a temp directory
 function makeTmp() {
@@ -558,6 +558,40 @@ describe('cmdWriteConfig — sdd write-config subcommand', () => {
     );
   });
 
+  // CA-05: --artifact-language creates project config
+  test('CA-05: --artifact-language spanish creates project config with artifactLanguage: spanish', () => {
+    const result = runWriteConfig(tmpDir, ['--artifact-language', 'spanish']);
+    assert.equal(result.status, 0, `Expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
+    const projectConfigPath = path.join(tmpDir, 'refacil-sdd', 'config.yaml');
+    assert.ok(fs.existsSync(projectConfigPath), 'refacil-sdd/config.yaml should be created');
+    const content = fs.readFileSync(projectConfigPath, 'utf8');
+    assert.ok(content.includes('artifactLanguage: spanish'), `Expected artifactLanguage: spanish in content: ${content}`);
+  });
+
+  // CR-05: --artifact-language with unknown value exits 1
+  test('CR-05: --artifact-language klingon exits with code 1 and error message', () => {
+    const result = runWriteConfig(tmpDir, ['--artifact-language', 'klingon']);
+    assert.equal(result.status, 1, `Expected exit 1, got ${result.status}`);
+    const combined = result.stdout + result.stderr;
+    assert.ok(
+      combined.includes('klingon') || combined.includes('artifact-language') || combined.includes('language'),
+      `Expected error about artifact-language. output: ${combined}`,
+    );
+  });
+
+  // CA-06: switching global artifactLanguage from spanish to english persists correctly
+  test('CA-06: switching global artifactLanguage from spanish to english persists correctly', () => {
+    runWriteConfig(tmpDir, ['--global', '--artifact-language', 'spanish']);
+    assert.ok(fs.existsSync(globalConfigPath), 'Global config must exist after first write');
+    const before = fs.readFileSync(globalConfigPath, 'utf8');
+    assert.ok(before.includes('artifactLanguage: spanish'), `Expected spanish in global config: ${before}`);
+
+    const result = runWriteConfig(tmpDir, ['--global', '--artifact-language', 'english']);
+    assert.equal(result.status, 0, `Expected exit 0 when switching to english, got ${result.status}. stderr: ${result.stderr}`);
+    const after = fs.readFileSync(globalConfigPath, 'utf8');
+    assert.ok(after.includes('artifactLanguage: english'), `Expected english in updated global config: ${after}`);
+  });
+
   // CR-04: corrupt existing file handled gracefully
   test('CR-04: corrupt existing config.yaml is handled gracefully (treat as absent, warns stderr)', () => {
     // Write a corrupt file at the project config path (parseYaml is lenient — returns {} for unrecognised content)
@@ -839,5 +873,204 @@ describe('loadBranchConfig — malformed YAML', () => {
     assert.doesNotThrow(() => loadBranchConfig(tmpDir));
     const result = loadBranchConfig(tmpDir);
     assert.ok(Array.isArray(result.protectedBranches));
+  });
+});
+
+// ── T-06: extractArtifactLanguage ────────────────────────────────────────────
+
+describe('extractArtifactLanguage — valid values', () => {
+  test('returns "english" for valid value "english"', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: 'english' }, 'project');
+    assert.equal(result, 'english');
+  });
+
+  test('returns "spanish" for valid value "spanish"', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: 'spanish' }, 'project');
+    assert.equal(result, 'spanish');
+  });
+
+  test('trims whitespace around a valid value', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: '  english  ' }, 'project');
+    assert.equal(result, 'english');
+  });
+
+  test('returns null when artifactLanguage key is absent', () => {
+    const result = extractArtifactLanguage({}, 'project');
+    assert.equal(result, null);
+  });
+});
+
+describe('extractArtifactLanguage — unknown value emits warning and returns null', () => {
+  let stderrOutput;
+  const originalWrite = process.stderr.write.bind(process.stderr);
+
+  beforeEach(() => {
+    stderrOutput = '';
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
+  test('returns null for an unknown language value', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: 'french' }, 'project');
+    assert.equal(result, null);
+  });
+
+  test('emits a warning for an unknown language value', () => {
+    extractArtifactLanguage({ artifactLanguage: 'klingon' }, 'global');
+    assert.ok(
+      stderrOutput.includes('warning') && stderrOutput.includes('klingon'),
+      `Expected warning mentioning unknown value. got: "${stderrOutput}"`,
+    );
+  });
+});
+
+describe('extractArtifactLanguage — empty value emits warning and returns null', () => {
+  let stderrOutput;
+  const originalWrite = process.stderr.write.bind(process.stderr);
+
+  beforeEach(() => {
+    stderrOutput = '';
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
+  test('returns null for an empty string', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: '' }, 'project');
+    assert.equal(result, null);
+  });
+
+  test('returns null for a whitespace-only string', () => {
+    const result = extractArtifactLanguage({ artifactLanguage: '   ' }, 'project');
+    assert.equal(result, null);
+  });
+
+  test('emits a warning for an empty string', () => {
+    extractArtifactLanguage({ artifactLanguage: '' }, 'project');
+    assert.ok(
+      stderrOutput.includes('warning'),
+      `Expected warning for empty artifactLanguage. got: "${stderrOutput}"`,
+    );
+  });
+});
+
+// ── T-06: loadBranchConfigWithSources — artifactLanguage cascade ─────────────
+
+describe('loadBranchConfigWithSources — artifactLanguage: no config → default english', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = makeTmp(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  test('returns default "english" when no config files exist', () => {
+    const globalExists = fs.existsSync(GLOBAL_CONFIG_PATH);
+    const renamed = GLOBAL_CONFIG_PATH + '.bak-lang-default';
+    if (globalExists) fs.renameSync(GLOBAL_CONFIG_PATH, renamed);
+    try {
+      const result = loadBranchConfigWithSources(tmpDir);
+      assert.equal(result.artifactLanguage, DEFAULT_ARTIFACT_LANGUAGE);
+      assert.equal(result.sources.artifactLanguage, 'default');
+    } finally {
+      if (globalExists) fs.renameSync(renamed, GLOBAL_CONFIG_PATH);
+    }
+  });
+
+  test('DEFAULT_ARTIFACT_LANGUAGE constant is "english"', () => {
+    assert.equal(DEFAULT_ARTIFACT_LANGUAGE, 'english');
+  });
+
+  test('SUPPORTED_LANGUAGES includes english and spanish', () => {
+    assert.ok(SUPPORTED_LANGUAGES.includes('english'));
+    assert.ok(SUPPORTED_LANGUAGES.includes('spanish'));
+  });
+});
+
+describe('loadBranchConfigWithSources — artifactLanguage: project overrides global', () => {
+  let tmpDir;
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-lang-proj';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+    writeYaml(GLOBAL_CONFIG_PATH, 'artifactLanguage: english\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('project artifactLanguage overrides global', () => {
+    writeYaml(
+      path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+      'artifactLanguage: spanish\n',
+    );
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.artifactLanguage, 'spanish');
+    assert.equal(result.sources.artifactLanguage, 'project');
+  });
+});
+
+describe('loadBranchConfigWithSources — artifactLanguage: global overrides default', () => {
+  let tmpDir;
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-lang-global';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+    writeYaml(GLOBAL_CONFIG_PATH, 'artifactLanguage: spanish\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('global artifactLanguage is used when no project config exists', () => {
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.artifactLanguage, 'spanish');
+    assert.equal(result.sources.artifactLanguage, 'global');
+  });
+});
+
+describe('loadBranchConfigWithSources — artifactLanguage: invalid project value falls through to global', () => {
+  let tmpDir;
+  let stderrOutput;
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-lang-invalid';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    stderrOutput = '';
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+    writeYaml(GLOBAL_CONFIG_PATH, 'artifactLanguage: spanish\n');
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('falls through to global when project has unknown artifactLanguage', () => {
+    writeYaml(
+      path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+      'artifactLanguage: klingon\n',
+    );
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.artifactLanguage, 'spanish');
+    assert.equal(result.sources.artifactLanguage, 'global');
+    assert.ok(stderrOutput.includes('warning'), 'Expected warning for invalid project value');
   });
 });

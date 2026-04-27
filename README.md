@@ -1,7 +1,5 @@
 # refacil-sdd-ai
 
-**npm**: [npmjs.com/package/refacil-sdd-ai](https://www.npmjs.com/package/refacil-sdd-ai) · **GitHub**: [github.com/Erikole21/refacil-sdd-ai](https://github.com/Erikole21/refacil-sdd-ai)
-
 **SDD-AI** (Specification-Driven Development with AI) packaged as a CLI.
 
 Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, and **OpenCode** that guide the developer through a structured AI-assisted development workflow, using **`refacil-sdd/`** as the specification store, plus a **local bus** so agents across different repos can communicate with each other.
@@ -31,8 +29,8 @@ refacil-sdd-ai init
 #    whose folder already exists. Use --all to install for all three without prompting.
 #    Copies skills and sub-agents to the selected IDEs, configures hooks,
 #    and creates/updates .claudeignore, .cursorignore and .opencodeignore.
-#    Also prompts for global branch config (baseBranch, protectedBranches) pre-filled
-#    from ~/.refacil-sdd-ai/config.yaml. Skipped with --yes or --defaults.
+#    Also prompts for global branch config (baseBranch, protectedBranches, artifactLanguage)
+#    pre-filled from ~/.refacil-sdd-ai/config.yaml. Skipped with --yes or --defaults.
 
 # 3. Restart your IDE session
 #    (new skills are not detected until you restart)
@@ -104,10 +102,42 @@ Native CLI for **`refacil-sdd/`** (no separate OpenSpec skill layer). Used by sk
 | `refacil-sdd-ai sdd tasks-update <name>` | Mark a task done (`--task N --done`) |
 | `refacil-sdd-ai sdd archive <name>` | Move a regular change to `refacil-sdd/changes/archive/` |
 | `refacil-sdd-ai sdd validate-name <name>` | Validate change folder name (must start with a letter) |
-| `refacil-sdd-ai sdd config [--json]` | Show effective branch configuration (protectedBranches, baseBranch) after cascade: project `refacil-sdd/config.yaml` → global `~/.refacil-sdd-ai/config.yaml` → built-in defaults |
-| `refacil-sdd-ai sdd write-config [--global] [--base-branch <v>] [--protected-branches <csv>]` | Write or merge branch config into `refacil-sdd/config.yaml` (project) or `~/.refacil-sdd-ai/config.yaml` (`--global`). Performs a semantic no-op check — skips rewrite if values are already set. Directory is auto-created if absent. |
+| `refacil-sdd-ai sdd config [--json]` | Show effective configuration (protectedBranches, baseBranch, artifactLanguage) after cascade: project `refacil-sdd/config.yaml` → global `~/.refacil-sdd-ai/config.yaml` → built-in defaults. `--json` also includes a `sources` field indicating the resolution level for each value (`project`, `global`, or `default`). |
+| `refacil-sdd-ai sdd write-config [--global] [--base-branch <v>] [--protected-branches <csv>] [--artifact-language <lang>]` | Write or merge config into `refacil-sdd/config.yaml` (project) or `~/.refacil-sdd-ai/config.yaml` (`--global`). Performs a semantic no-op check — skips rewrite if values are already set. Directory is auto-created if absent. |
 
 Run **`refacil-sdd-ai help`** for the full list including `bus` and `compact` subcommands.
+
+### Artifact Language
+
+By default, `/refacil:propose` generates proposal, specs, design, and tasks in **English**. Set `artifactLanguage` to have the artifacts produced in your team's preferred language so developers can review them in their natural language.
+
+**Supported values**: `english` (default) · `spanish`
+
+**Configure globally** — applies to all repos for this user:
+
+```bash
+refacil-sdd-ai sdd write-config --global --artifact-language spanish
+```
+
+**Configure per project** — overrides the global value (commit `refacil-sdd/config.yaml` for team-wide effect):
+
+```bash
+refacil-sdd-ai sdd write-config --artifact-language spanish
+```
+
+**Check the active value**:
+
+```bash
+refacil-sdd-ai sdd config
+# artifactLanguage [global]: spanish
+
+refacil-sdd-ai sdd config --json
+# { ..., "artifactLanguage": "spanish", "sources": { "artifactLanguage": "global" } }
+```
+
+**Cascade**: project `refacil-sdd/config.yaml` → global `~/.refacil-sdd-ai/config.yaml` → default `english`.
+
+`refacil-sdd-ai init` also prompts for this preference and writes to the global config. Skip with `--yes` to keep the current value.
 
 ### Command rewrite control (`compact-bash`)
 
@@ -382,7 +412,7 @@ Defined in `skills/prereqs/METHODOLOGY-CONTRACT.md`:
 - **Multi-stack tests**: detects the real test command (does not hardcode `npm test`).
 - **`AGENTS.md` by profile** (`sdd` vs `agents`): the methodology respects both.
 - **Output mode**: concise by default, detailed on demand.
-- **Language policy**: internal agent and skill instructions are in **English**. Responses to the user are in the **user's language** (default: Spanish). SDD artifacts are in the **team's agreed language**.
+- **Language policy**: internal agent and skill instructions are in **English**. Responses to the user are in the **user's language** (default: Spanish). SDD artifact language (proposal, specs, design, tasks) defaults to **English** and is configurable via `artifactLanguage` — see [Artifact Language](#artifact-language).
 
 ---
 

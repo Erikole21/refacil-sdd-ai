@@ -153,6 +153,18 @@ Effort estimate: **S** (< 1h), **M** (1-4h), **L** (> 4h).
 
 ### Step 1: Explore the codebase
 
+#### Step 1a: Language resolution (run FIRST, before any exploration)
+
+Run: `refacil-sdd-ai sdd config --json`
+
+Read the `artifactLanguage` field from the JSON output. Prepend the following instruction to your working context for this session:
+
+> Generate ALL artifact content (proposal.md, specs.md, design.md, tasks.md) in **<artifactLanguage>** language. This applies to all prose, comments, labels, and descriptions inside the artifact files.
+
+Fallback rule: if the command fails, produces invalid JSON, or returns an unknown/missing `artifactLanguage` value, use `english` and continue without interruption.
+
+#### Step 1b: Codebase exploration
+
 Before generating artifacts, explore the project so that `design.md` is realistic and not invented:
 - Read `AGENTS.md` to understand the current architecture.
 - Identify files and modules relevant to the described change.
