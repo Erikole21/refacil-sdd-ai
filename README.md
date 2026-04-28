@@ -6,7 +6,7 @@ Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, and **Op
 
 ---
 
-**npm:** [claude-code-tutor](https://www.npmjs.com/package/refacil-sdd-ai) | **GitHub:** [Erikole21/claude-code-tutor](https://github.com/Erikole21/refacil-sdd-ai)
+**npm:** [refacil-sdd-ai](https://www.npmjs.com/package/refacil-sdd-ai) | **GitHub:** [Erikole21/refacil-sdd-ai](https://github.com/Erikole21/refacil-sdd-ai)
 
 ## Requirements
 
