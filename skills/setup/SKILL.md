@@ -141,7 +141,16 @@ A monorepo may add `.agents/services.md`; a library may combine testing in stack
 
 ### Step 4b: Overwrite `CLAUDE.md` and `.cursorrules`
 
-Always **overwrite** both files even if they already exist — they are thin indexes toward `AGENTS.md`, they must not contain project detail.
+Before writing IDE-specific files, detect installed IDE directories in repo root (`.claude/`, `.cursor/`, `.opencode/`).  
+Only create/update files for IDEs whose directory exists. Never create files for an IDE that is not present.
+
+Rules:
+- If `.claude/` exists: overwrite `CLAUDE.md`.
+- If `.cursor/` exists: overwrite `.cursorrules`.
+- If both exist: overwrite both.
+- If neither exists: do not create either file; report that no supported IDE folder was detected and suggest running `refacil-sdd-ai init`.
+
+When created, these files are thin indexes toward `AGENTS.md` and must not contain project detail.
 
 **`CLAUDE.md`** — minimal index, no project content:
 
@@ -158,12 +167,17 @@ All project detail, stack, rules and `refacil:*` commands live in `.agents/` and
 
 ### Step 5: Context exclusion files
 
-`refacil-sdd-ai init` automatically creates or updates `.claudeignore` and `.cursorignore` with standard entries (node_modules/, dist/, logs, binaries, secrets, etc.).
+Sync ignore files only for detected IDE directories:
+- `.claude/` → `.claudeignore`
+- `.cursor/` → `.cursorignore`
+- `.opencode/` → `.opencodeignore`
+
+Do not create `.claudeignore`, `.cursorignore`, or `.opencodeignore` if the matching IDE directory does not exist.
 
 If the files already exist, only missing entries are added — custom content is not overwritten.
 
 Inform the user of the result:
-- **Created**: both files were created from scratch.
+- **Created**: the detected IDE ignore file(s) were created from scratch.
 - **Updated**: missing entries were added.
 - **No changes**: they already had all the entries.
 
@@ -171,14 +185,18 @@ If the user wants to customize additional exclusions, they can edit them directl
 
 ### Step 6: Verify skills
 
-- Refacil: `refacil-*` folders under `.claude/skills/` and `.cursor/skills/`. If not: `refacil-sdd-ai init` + restart session.
+- Refacil: verify `refacil-*` folders only under detected IDE directories:
+  - `.claude/` detected → check `.claude/skills/`
+  - `.cursor/` detected → check `.cursor/skills/`
+  - `.opencode/` detected → check `.opencode/skills/`
+  If missing for any detected IDE: run `refacil-sdd-ai init` and restart session.
 - Verify `sdd` subcommand: `refacil-sdd-ai sdd 2>&1 || true` — must show subcommands `status`, `mark-reviewed`, `tasks-update`, `archive`.
 
 ### Step 7: Final summary
 
 ```
 === refacil:setup completed ===
- Node.js / refacil-sdd-ai / refacil-sdd/changes/ / branch config / AGENTS.md / CLAUDE.md / .cursorrules / .claudeignore / .cursorignore / skills OK
+ Node.js / refacil-sdd-ai / refacil-sdd/changes/ / branch config / AGENTS.md / IDE files (detected only) / ignore files (detected only) / skills OK
 
  Restart Claude Code or Cursor session if this is the first skills installation.
  The next step is to review the available flow.
