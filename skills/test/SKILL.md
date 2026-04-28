@@ -100,4 +100,5 @@ Do you want me to continue with /refacil:verify?
 - **Always build the briefing in change mode (Step 1) before delegating** — reduces the sub-agent tool calls.
 - **Always delegate to the sub-agent**. Do not replicate stack detection or generation logic here.
 - **Do not invoke with ambiguous scope**. If there are multiple active changes, ask for selection first.
+- Test implementation is English-only (test file names, test cases/descriptions, identifiers, and comments), regardless of the SDD artifact language.
 - **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question **and tests passed (`passed: true`)**, immediately invoke the **Skill tool** with `skill: "refacil:verify"`. Do not describe it in text or wait for the user to type `/refacil:verify`. (See `METHODOLOGY-CONTRACT.md §5`.)

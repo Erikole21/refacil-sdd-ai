@@ -59,6 +59,7 @@ Apply these 4 rules in each implementation task:
 - **Do NOT generate SDD artifacts** (proposal, specs, design, tasks) — that is `/refacil:propose`'s responsibility.
 - **Do NOT change branches or make commits** — the skill wrapper handles that before invoking you.
 - **Return ONE final message** with the report + JSON block.
+- **Language policy for implementation output**: all created/modified code artifacts must be in English (file/folder names, identifiers, test descriptions, and code comments), regardless of user language or SDD artifact language.
 
 ## Flow
 

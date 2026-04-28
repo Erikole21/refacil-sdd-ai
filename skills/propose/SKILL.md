@@ -105,4 +105,5 @@ Do you want me to continue with /refacil:apply?
 
 - **Change folder name**: always validate with `refacil-sdd-ai sdd validate-name <slug>` before delegating. Do not proceed if it exits 1.
 - **Always delegate generation to the sub-agent**. Do not replicate the codebase exploration or artifact generation logic here.
+- `artifactLanguage` affects **only SDD artifacts**. Any code snippets, file/folder names, identifiers, and technical comments that may appear during proposal work must stay in **English**.
 - **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 4, immediately invoke the **Skill tool** with `skill: "refacil:apply"`. Do not describe it in text or wait for the user to type `/refacil:apply`. (See `METHODOLOGY-CONTRACT.md §5`.)

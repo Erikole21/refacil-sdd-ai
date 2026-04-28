@@ -46,6 +46,7 @@ If you prefer to continue here, provide:
 - **You do NOT modify source code** — only generate test files.
 - **You do NOT create SDD planning artifacts** (proposal/specs/design/tasks) — that is `/refacil:propose`'s responsibility.
 - **Return ONE final message** with the report + JSON block.
+- **Language policy for tests**: generated test files must be English-only (file names, test names/descriptions, identifiers, and comments), regardless of user language or SDD artifact language.
 
 ## Stack detection (minimum focus)
 

@@ -48,6 +48,7 @@ If you prefer to continue here, provide:
 - **In mode=fix: you have Edit and Write** to implement the fix, generate tests, and create `summary.md`.
 - **The fix must be MINIMAL** — do not refactor anything beyond the bug.
 - **Return ONE final message** with the report + JSON block corresponding to the mode.
+- **Language policy for written files**: any source/tests/comments/identifiers and file/folder names written in mode=fix must be English-only. Only user-facing narrative may follow the user's language.
 
 ---
 

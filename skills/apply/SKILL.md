@@ -182,4 +182,5 @@ If the sub-agent returned `result: "PARTIAL"` or `"FAILED"`, present the `issues
 - Meet the preconditions of Step 0 (complete artifacts) and Step 1 (valid working branch) **before delegating**.
 - **Always build the briefing (Step 1.5) before delegating** — it is the key piece that reduces the sub-agent cost.
 - **Always delegate implementation to the sub-agent**. Do not replicate implementation logic or SDD artifact-apply logic here.
+- Even when artifacts are Spanish, implementation output is English-only: created file/folder names, source code, test code, identifiers, and code comments.
 - **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 3, immediately invoke the **Skill tool** with `skill: "refacil:test"`. Do not describe it in text or wait for the user to type `/refacil:test`. (See `METHODOLOGY-CONTRACT.md §5`.)

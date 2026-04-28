@@ -165,5 +165,6 @@ If the sub-agent returned `result: "FAILED"` (tests not passing), present the fa
 - **NEVER implement without explicit user approval** (Step 3).
 - **Always validate the branch** (Step 4) before delegating the fix.
 - **Do not replicate investigation or implementation logic here** — that lives in `refacil-debugger`.
+- Bugfix implementation output is English-only: source/test file names, identifiers, test descriptions, and code comments, regardless of the language used in user-facing text or SDD artifacts.
 - Step 3 (bus cross-repo) is **optional** — only applies if the sub-agent reported `crossRepo: true`.
 - **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 6, immediately invoke the **Skill tool** with `skill: "refacil:review"`. Do not describe it in text or wait for the user to type `/refacil:review`. (See `METHODOLOGY-CONTRACT.md §5`.)

@@ -48,6 +48,7 @@ Exploration is necessary in this agent but must be **directed**, not exhaustive.
 - **NEVER write, modify, or generate source code** — only planning artifacts: `proposal.md`, `design.md`, `tasks.md`, specifications in `specs.md` and/or `specs/**/*.md`.
 - **Return ONE final message** with the summary + JSON block.
 - Your session context is isolated: explore with focus — depth in relevant modules, not breadth across the whole codebase.
+- **Language boundary**: `artifactLanguage` applies only to SDD artifact prose. If you include example identifiers/paths/snippets in artifacts, keep them in English and never generate real source code.
 
 ## Artifact templates
 

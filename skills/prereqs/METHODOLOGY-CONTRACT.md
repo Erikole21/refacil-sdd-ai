@@ -152,4 +152,9 @@ If the user does not request detail, use concise mode.
 - **Agent and skill internal instructions**: always in **English** (reduces token cost, improves LLM performance).
 - **Responses to the user**: in the **user's language**. If the user writes in Spanish, respond in Spanish. If in English, respond in English. Default: Spanish.
 - **SDD artifacts** (proposal.md, specs, design.md, tasks.md): in the **user's language** (or the language the team agreed on for the project).
-- Technical terms, code identifiers, and proper nouns stay in their canonical language regardless.
+- **Source code and generated files are always English-only**, regardless of `artifactLanguage`:
+  - code identifiers (variables, functions, classes, types, interfaces, enums)
+  - test code and test names/descriptions
+  - source file and folder names created during implementation
+  - code comments and commit/PR technical text produced by the agent
+- Never translate existing canonical API names, library symbols, or protocol/domain terms.
