@@ -8,6 +8,15 @@ user-invocable: true
 
 Starts or joins a `refacil-bus` room (local chat room between agents). Argument **$ARGUMENTS** = room name.
 
+## Purpose of joining
+
+Joining a room enables **cross-repo, multi-agent integration work**. The expected use is:
+- consult another repo as source of truth for integration contracts
+- clarify input/output behavior across service boundaries
+- coordinate contract-aligned changes following SDD-AI in each repo
+
+Do not treat the room as general chat. Keep interactions focused on integration uncertainty and ownership.
+
 ## Instructions
 
 ### Step 1: Verify that the presentation block exists in `AGENTS.md`
@@ -73,6 +82,7 @@ Report:
 - Room joined and session name
 - Current members
 - How others can consult this session: `/refacil:ask @<session> "..."`
+- Reminder of scope: use bus messages for cross-repo contract clarification (inputs/outputs, events, compatibility), not generic conversation.
 
 ## Rules
 

@@ -38,6 +38,31 @@ Before drafting the `--text`, classify what you are going to ask `@<destination>
 
 If you mix query + change, separate into two messages or make clear which part is read-only and which is versionable work in the other repo.
 
+### Step 1.6: Contract-first framing (recommended)
+
+For cross-repo integrations, prioritize questions that remove ambiguity in **input/output contracts**. A good `ask` usually includes:
+- integration point (endpoint/event/queue and direction)
+- expected input schema/fields and validation rules
+- expected output schema/statuses/errors
+- compatibility/version constraints
+
+This framing increases response quality and reduces back-and-forth.
+
+### Step 1.7: Structured template for integration asks (recommended)
+
+When the question is about cross-repo integration contracts, draft the `--text` using this minimal template:
+
+```text
+integrationPoint: <endpoint/event/queue + direction X->Y or Y->X>
+inputContract: <required/optional fields + key validation rules>
+outputContract: <expected output/status/errors>
+compatibility: <version/flags/env constraints or "unknown">
+sourceOfTruthRequest: <where to confirm in destination repo>
+question: <concrete doubt to resolve>
+```
+
+If some fields are unknown, send `unknown` explicitly — do not invent values.
+
 ### Step 2: Decide whether to use `--wait`
 
 Two modes:
@@ -65,6 +90,7 @@ Use `Bash` with the chosen command.
 ### Step 4: Process result
 
 - If `--wait` brought a response: use it as context to continue your work; do not just report the message, continue with the flow the user asked for.
+- If the response is partial or ambiguous: send a **retry ask** in the same thread, reusing the template fields that remain unresolved.
 - If `--wait` expired: inform the user and propose `/refacil:inbox` to review later.
 - If fire-and-forget: confirm to the user that it was sent.
 
@@ -76,3 +102,4 @@ Use `Bash` with the chosen command.
 - If the destination does not exist in the room, the message is stored in `inbox.jsonl` and will be delivered when they join.
 - If you **agreed** with another session that they will change their repo, they must use **`/refacil:propose`** there and **notify you via bus** when done; if they request changes from you, you do the same here. Full convention: `refacil-prereqs/BUS-CROSS-REPO.md`.
 - **`ask`s that are change requests** must be **substantive in scope** (Step 1.5): the recipient already uses the methodology; do not repeat the guide in the text. Do not use the bus to request opaque quick fixes when the impact requires SDD-AI.
+- For cross-repo contract clarifications, prefer Step 1.7 template. The same structure should also be expected in replies to ease retries.

@@ -8,6 +8,9 @@ user-invocable: true
 
 This skill is a **wrapper** that guides the user through the bug fix flow and delegates the heavy work to the `refacil-debugger` sub-agent. The sub-agent operates in two modes: `investigation` (analyzes and proposes hypotheses without modifying anything) and `fix` (implements the approved correction, generates tests, and creates traceability). Hypothesis confirmation and branch validation occur in this wrapper, between the two invocations.
 
+The investigation stage follows a **diagnose loop** to reduce weak fixes:
+1) reproduce, 2) minimize scope, 3) form evidence-backed hypotheses, 4) validate evidence, 5) propose minimal correction.
+
 **Prerequisites**: `agents` profile from `refacil-prereqs/SKILL.md` + rules from `METHODOLOGY-CONTRACT.md`.
 
 ## Flow
@@ -40,8 +43,10 @@ Invoke the `refacil-debugger` sub-agent passing it:
 - `description`: complete bug description (collected in Step 1 or from `$ARGUMENTS`).
 
 The sub-agent:
+- Reproduces and minimizes the failure scope first.
 - Searches the codebase for symbols/files from logs or stack traces.
 - Traces the flow from entry to the failure point.
+- Validates hypotheses with explicit evidence.
 - Reviews recent commits if the bug is new.
 - Returns hypotheses ordered by confidence + proposed correction, fenced as ` ```refacil-debug-investigation `.
 
@@ -51,6 +56,7 @@ Show the user the hypotheses and the proposed correction. Ask explicitly:
 
 ```
 Most confident hypothesis: [description — file:line]
+Evidence used: [repro step / observed condition / validation result]
 Proposed fix: [minimal description]
 Files to modify: [list]
 
@@ -162,6 +168,7 @@ If the sub-agent returned `result: "FAILED"` (tests not passing), present the fa
 ## Rules
 
 - **Always investigate before proposing** — do not delegate the fix without a confirmed hypothesis.
+- In investigation, prefer the diagnose loop order: reproduce → minimize → hypothesize → validate evidence → propose fix.
 - **NEVER implement without explicit user approval** (Step 3).
 - **Always validate the branch** (Step 4) before delegating the fix.
 - **Do not replicate investigation or implementation logic here** — that lives in `refacil-debugger`.

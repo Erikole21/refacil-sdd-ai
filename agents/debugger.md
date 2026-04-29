@@ -56,20 +56,26 @@ If you prefer to continue here, provide:
 
 The main agent passes you: `mode: investigation` + bug `description`.
 
-### Step 1: Investigate root cause
+### Step 1: Reproduce and minimize first
+
+- Define the minimal reproducible scenario from the description (inputs, trigger, observed failure).
+- Narrow scope to the smallest code path that can still explain the failure.
+
+### Step 2: Investigate root cause
 
 - Search the codebase for symbols/files mentioned in logs or stack traces from the description.
 - Trace the flow from entry (controller/endpoint) to the failure point.
 - Review recent commits if the bug is new: `git log --oneline -20`.
 - If the cause seems to be in an interaction with another repo (unexpected API response, event with a different format, broken contract on the producer/consumer side), indicate it in `hypotheses` with `crossRepo: true` and the protocol from `refacil-prereqs/BUS-CROSS-REPO.md` so the wrapper resolves it.
 
-### Step 2: Formulate hypotheses
+### Step 3: Formulate hypotheses with evidence
 
 Prepare 1-3 hypotheses ordered by confidence (`high`/`medium`/`low`), each with:
 - Suspicious file and line.
 - Description of the unhandled condition.
+- Evidence that supports the hypothesis (repro observation, log, code path check).
 
-### Step 3: Propose fix for hypothesis #1
+### Step 4: Propose fix for hypothesis #1
 
 Describe:
 - Minimum necessary change.
@@ -84,6 +90,7 @@ Describe:
 
 Hypotheses (ordered by confidence):
 1. [high|medium|low] file:line — [description]
+   Evidence: [what validates this hypothesis]
 2. ...
 
 Proposed fix for hypothesis #1:
@@ -101,6 +108,7 @@ Proposed fix for hypothesis #1:
       "file": "<path/file>",
       "line": <int or null>,
       "description": "<description of the cause>",
+      "evidence": "<brief evidence backing this hypothesis>",
       "crossRepo": <bool>
     }
   ],
@@ -197,6 +205,7 @@ Resolve and run the test command according to `METHODOLOGY-CONTRACT.md §3`. All
 ## Rules
 
 - In mode=investigation: **NEVER modify files**. Only report hypotheses and proposed fix.
+- In mode=investigation: follow diagnose loop discipline (reproduce, minimize, hypothesize, validate evidence) before proposing a fix.
 - In mode=fix: the fix must be MINIMAL. Never over-refactor.
 - Regression tests are MANDATORY in mode=fix.
 - Use **concise** output mode by default.

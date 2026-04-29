@@ -443,6 +443,8 @@ Local bus (WebSocket over `127.0.0.1`) so agents across different repos can comm
 
 **SDD-AI conventions in the bus**: anyone in the room joined with `/refacil:join` (methodology already active in the repo). **Change requests** to another session go with **clear scope** in the `ask` (no pasting the guide in every message); the destination repo channels with **`/refacil:propose`** and whoever implements **closes via bus** to who requested the work. Details and edge cases: `refacil-prereqs/BUS-CROSS-REPO.md` in the installed skills.
 
+**Contract-first questions (recommended)**: for cross-repo integration clarifications, format `ask/reply` around contract fields (integration point, input contract, output contract, compatibility, source of truth). If the first response is partial, send a focused retry `ask` only for unresolved points. This keeps bus conversations actionable for integration work instead of generic chat.
+
 **Pure observer** (0 tokens): `refacil-sdd-ai bus watch <session>` or `refacil-sdd-ai bus view` for the web UI.
 
 > **Diagrams, scenarios and pitch**: see `refacil-bus-diagrams.md` (included in the package) — includes architecture, flow with attend, flow without attend, comparative impact table, and visual decision guide (Mermaid).

@@ -29,6 +29,8 @@ Skills are identical in `.claude/skills/refacil-*/` (Claude Code) and `.cursor/s
 
 Local plain-text channel between Claude Code / Cursor sessions running in different repos. Prevents the developer from manually transcribing context between their own agents.
 
+Primary intent: **cross-repo integration clarity**. Use it to clarify service **input/output contracts** (APIs, events, queues, compatibility, errors) when the source of truth is in another repo.
+
 | Command | Description |
 |---------|-------------|
 | `/refacil:join <room>` | Create or join a room. First time generates an introduction block in `AGENTS.md`. |
@@ -39,6 +41,8 @@ Local plain-text channel between Claude Code / Cursor sessions running in differ
 | `/refacil:inbox` | View new messages since the last read. |
 
 Typical usage: before starting a task that may require context from other repos, the developer puts the agent in each other repo into `/refacil:attend`. Then, in their working repo, the LLM can request context with `/refacil:ask @<repo> "..." --wait` and receive the response automatically without the developer switching between windows.
+
+In microservice setups (repo X depends on repo Y), use the bus when X cannot validate Y's real behavior from local code alone. Keep questions contract-focused and explicit.
 
 If changes affecting a repo are agreed upon in the room, the SDD-AI flow (`/refacil:propose`, etc.) is followed in that repo and the implementer **notifies via the bus** when done (details in `refacil-prereqs/BUS-CROSS-REPO.md` in the package). **`ask` requests that involve work** in another repo must include **clear scope**; the destination uses **`/refacil:propose`** by convention. See skill `/refacil:ask`.
 

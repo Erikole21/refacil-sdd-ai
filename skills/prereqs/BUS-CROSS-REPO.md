@@ -2,11 +2,31 @@
 
 Shared protocol for all skills that may need context from another repository during execution (`explore`, `propose`, `verify`, `bug`).
 
+## Primary objective (non-negotiable)
+
+The bus is not a generic chat channel. Its primary purpose is **cross-repo and multi-agent integration clarity**:
+
+- Clarify **input/output contracts** between services (request payloads, response schemas, events, queues, headers, status/error semantics).
+- Resolve uncertainty when a flow in this repo depends on behavior implemented in another repo.
+- Coordinate implementation ownership when a contract mismatch is found.
+
+If a bus conversation does not improve integration certainty, it is probably off-scope.
+
 ## When to apply
 
 Each skill defines its own trigger (see its `SKILL.md`). In general, apply when the skill detects that **it needs information that does not live in this repo** and assuming it would risk an error: API contracts, event formats, consumer/producer behavior, shared queues.
 
 **Golden rule**: the bus is **optional and non-blocking**. Do not invoke it if the question can be answered by reading this repo's code, or if there is no real cross-repo uncertainty. If the dev answers or clarifies the doubt directly (verbally, via chat, with a link to docs, etc.), **the skill continues normally** — the bus is only one of the possible ways to resolve the unknown.
+
+### Typical trigger in microservice architectures
+
+If repository **X** calls or consumes service **Y** but **Y** lives in another repo, and this repo cannot validate the real contract or behavior by itself, use the bus to consult the agent in **Y**.
+
+This includes:
+- endpoint signatures and field semantics
+- event payload versions and compatibility
+- producer/consumer assumptions not documented in the current repo
+- acceptance/rejection behavior for invalid input
 
 ## Protocol (3 steps)
 
@@ -20,6 +40,41 @@ When the skill's trigger is met:
 
 If the user does not know the bus or does not know how to configure it, refer them to `/refacil:guide` (section "Bus between agents") before attempting the consultation.
 
+### Message quality for high-impact answers
+
+When asking through the bus, frame questions around contracts and observable behavior:
+- expected input shape
+- output shape and error modes
+- version/compatibility constraints
+- source-of-truth location in destination repo
+
+Avoid vague requests like "check this integration". Prefer concrete contract questions.
+
+Recommended ask template (integration clarification):
+
+```text
+integrationPoint: <endpoint/event/queue + direction>
+inputContract: <fields + validations>
+outputContract: <outputs/status/errors>
+compatibility: <version/constraints or unknown>
+sourceOfTruthRequest: <where to confirm in destination repo>
+question: <concrete doubt>
+```
+
+Recommended reply template:
+
+```text
+integrationPoint: <confirmed value>
+inputContract: <confirmed value>
+outputContract: <confirmed value>
+compatibility: <confirmed value or unknown>
+sourceOfTruth: <file/path/symbol in destination repo>
+confidence: <high|medium|low>
+openQuestions: <none | unresolved items>
+```
+
+These templates support both first-pass clarification and retry loops.
+
 **Valid output without bus**: at any point in the protocol, if the dev answers or clarifies the doubt directly, record their response as context and **continue with the skill flow**. Do not insist on using the bus or block progress waiting for a cross-repo confirmation the dev already answered through another channel.
 
 ## How to use the response
@@ -30,6 +85,8 @@ Each skill decides what to do with the response:
 - `propose`: adjust `specs.md` / `design.md` before human review.
 - `verify`: incorporate it into the combined report as SUGGESTION; if it reveals a real bug, escalate to WARNING/CRITICAL.
 - `bug`: use it to confirm whether the fix goes in this repo, the other, or both (in which case the other will have its own `/refacil:bug`).
+
+If the response is partial, send a retry `ask` focused only on unresolved `openQuestions`.
 
 ## Room agreements and changes in this repo
 
@@ -53,3 +110,4 @@ By default: **do not close silently** when another session was waiting for the r
 - Do not insist if the dev prefers to resolve it another way (direct reading, docs, verbal question to a colleague).
 - Do not skip `/refacil:propose` (or equivalent user order) for changes agreed in a room that affect this repo without an explicit contrary instruction.
 - Do not **fail to respond via bus** to the requester or the room when you finish a change others were waiting for (see previous section).
+- Do not use the bus for open-ended brainstorming unrelated to cross-repo integration contracts.
