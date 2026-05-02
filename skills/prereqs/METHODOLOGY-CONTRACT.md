@@ -32,6 +32,32 @@ Detection order:
 
 Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `pytest --cov`, etc.). If it does not exist, report N/A with justification.
 
+### §3.1 — Scoped test execution (default for `/refacil:test` and `/refacil:verify`)
+
+**Goal**: avoid high RAM/CPU from **full-repo** suites and **repo-wide** coverage on every SDD step. Defaults exercise **tests + coverage only for what the change touches**; full regression stays **on-demand** (explicit skill arguments).
+
+| Briefing field | Values | Default |
+|----------------|--------|---------|
+| `testScope` | `scoped` \| `full` | `scoped` |
+| `runCoverage` | `true` \| `false` | `true` |
+
+**Rules**
+
+1. **`testScope: scoped`** (default): sub-agents run tests **only** for artifacts tied to the current change — never invoke the §3 baseline in **full-repo / full-suite** form without narrowing (paths, packages, filters, patterns), except the explicit fallbacks below.
+2. **`testScope: full`**: **on-demand only** — user explicitly requests whole-suite regression in **`/refacil:test`** (or `/refacil:verify`) arguments (e.g. `full`, `all tests`, `whole suite`, `suite completa`). Then use the §3 baseline test command **without** path narrowing and, if coverage runs, use the project’s **normal** coverage entrypoint without narrowing collection to the diff (unless `AGENTS.md` defines otherwise).
+3. **`runCoverage: true`** (default): after scoped tests pass, run coverage **narrowed to the change** — instrument/collect only for **`filesToTest`**, **`changedFiles`**, and companion test/spec paths tied to those modules (examples: `--cov=pkg/sub`, Jest `--collectCoverageFrom` globs limited to touched trees, Gradle/JaCoCo scoped modules). If the toolchain cannot narrow, report **N/A** plus a WARNING; do **not** silently widen to repo-wide coverage while `testScope` remains `scoped`.
+4. **`runCoverage: false`**: skip coverage entirely — only when the user **explicitly** opts out (`no coverage`, `nocoverage`, `skip coverage`, `sin cobertura`, etc.) or the project defines **no** coverage command under §3.
+5. **`runCoverage: true` + `testScope: full`**: run the project coverage command **after** the full suite passes, using the repo’s usual global/module coverage behavior (heavy — intended only when the user requested `full`).
+
+**Scoped command patterns** (language-agnostic — sub-agent reads `AGENTS.md`, build config, and tool docs; run from the correct module/root):
+
+- Pass **explicit test paths**, **packages**, **classes**, or **filters** accepted by that stack (examples: Maven ` -Dtest=…`, Gradle `--tests …`, pytest file paths, `go test ./pkg/…`, `cargo test -p pkg`, .NET solution filter, Ruby `bundle exec rspec path`, JS package scripts with paths after `--`).
+- Prefer files **produced or updated in this session**; until they exist, use the narrowest supported pattern (basename, substring, regex) derived from `filesToTest` / `changedFiles`, per runner docs.
+- **Scoped coverage**: combine the same narrowing with coverage flags/includes that limit **report collection** to touched sources (runner-specific); exclude unrelated packages by default when `testScope: scoped`.
+- **Unreliable scope**: if narrowing cannot be done safely, run the baseline §3 command **once**, report a brief WARNING that the run may be heavy, and suggest CI or **`/refacil:test ... full`** for full regression.
+
+**Verify**: Prefer `commandsRun` from `get-memory` (same invocation as `/refacil:test` when present). Else derive scoped targets from `changedFiles` and/or `git diff --name-only`, using **project test naming and layout** (`AGENTS.md`, test config): e.g. co-located `*Spec.*` / `*Test.*`, `tests/`, language-specific suffices — not a fixed extension.
+
 ## §4 — Protected branch policy and branch creation
 
 > **Dynamic config**: before applying any branch rule, run `refacil-sdd-ai sdd config --json`

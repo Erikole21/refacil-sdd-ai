@@ -15,17 +15,23 @@ const {
   installAgents,
   installOpenCodeJson,
   removeSkills,
+  removeGlobalSkills,
   removeOpenCodeArtifacts,
   removeOpenspecLegacyAssets,
+  removeProjectLevelArtifacts,
   createClaudeMd,
   createCursorRules,
   readRepoVersion,
   writeRepoVersion,
+  readGlobalVersion,
+  writeGlobalVersion,
   getPackageVersion,
   checkNodeVersion,
   checkClaudeCodeVersion,
 } = require('../lib/installer');
-const { installHooks, uninstallHooks, cleanLegacySettingsHooks, installOpenCodePlugin, uninstallOpenCodePlugin } = require('../lib/hooks');
+const { installHooks, uninstallHooks, cleanLegacySettingsHooks, installOpenCodePlugin, uninstallOpenCodePlugin, removeProjectLevelHooks } = require('../lib/hooks');
+const { globalClaudeDir, globalCursorDir, globalOpenCodeDir, readSelectedIDEs, writeSelectedIDEs } = require('../lib/global-paths');
+const { detectInstalledIDEs } = require('../lib/ide-detection');
 const { handleCompact } = require('../lib/commands/compact');
 const { handleBus } = require('../lib/commands/bus');
 const { handleSdd, autoMigrateOpenspec, findProjectRoot, cmdWriteConfig } = require('../lib/commands/sdd');
@@ -120,6 +126,16 @@ function notifyUpdate() {
 }
 
 function repoIsInitialized() {
+  const home = os.homedir();
+  // Check global dirs first (new installation model)
+  if (
+    fs.existsSync(path.join(globalClaudeDir(home), 'skills')) ||
+    fs.existsSync(path.join(globalCursorDir(home), 'skills')) ||
+    fs.existsSync(path.join(globalOpenCodeDir(home), 'skills'))
+  ) {
+    return true;
+  }
+  // Fallback: check legacy project-level dirs for backward compat
   return (
     fs.existsSync(path.join(projectRoot, '.claude', 'skills')) ||
     fs.existsSync(path.join(projectRoot, '.cursor', 'skills')) ||
@@ -183,7 +199,7 @@ function readlineMultiSelect(options) {
 
 /**
  * Show interactive IDE selector if TTY and --all not in args.
- * Pre-selects IDEs by folder presence.
+ * Pre-selects IDEs based on detected installations and global dir presence.
  * Returns selected IDE dirs (e.g. ['.claude', '.cursor', '.opencode']).
  */
 async function selectIDEs() {
@@ -195,10 +211,26 @@ async function selectIDEs() {
     return allIDEs;
   }
 
+  // Determine pre-selection: persisted selection takes priority over detection.
+  // Detection only filters which IDEs are available (installed in system).
+  const detectedIds = detectInstalledIDEs();
+  const savedSelection = readSelectedIDEs();
+  const hasSaved = savedSelection !== null;
+
+  const claudeSelected = hasSaved
+    ? savedSelection.includes('.claude')
+    : detectedIds.includes('claude') || fs.existsSync(path.join(projectRoot, '.claude'));
+  const cursorSelected = hasSaved
+    ? savedSelection.includes('.cursor')
+    : detectedIds.includes('cursor') || fs.existsSync(path.join(projectRoot, '.cursor'));
+  const openCodeSelected = hasSaved
+    ? savedSelection.includes('.opencode')
+    : detectedIds.includes('opencode') || fs.existsSync(path.join(projectRoot, '.opencode'));
+
   const options = [
-    { label: 'Claude Code (.claude/)', value: '.claude', selected: fs.existsSync(path.join(projectRoot, '.claude')) },
-    { label: 'Cursor (.cursor/)', value: '.cursor', selected: fs.existsSync(path.join(projectRoot, '.cursor')) },
-    { label: 'OpenCode (.opencode/)', value: '.opencode', selected: fs.existsSync(path.join(projectRoot, '.opencode')) },
+    { label: 'Claude Code (~/.claude/)', value: '.claude', selected: claudeSelected },
+    { label: 'Cursor (~/.cursor/)', value: '.cursor', selected: cursorSelected },
+    { label: 'OpenCode (global config dir)', value: '.opencode', selected: openCodeSelected },
   ];
 
   // Try @clack/prompts first, fall back to inline readline
@@ -238,13 +270,14 @@ function semverGt(a, b) {
 
 function syncRepoSkillsIfStale(globalVersion) {
   if (!repoIsInitialized()) return null;
-  const repoVersion = readRepoVersion(projectRoot);
+  // Repo-level version takes priority; fall back to global store
+  const repoVersion = readRepoVersion(projectRoot) || readGlobalVersion(os.homedir(), projectRoot);
   if (repoVersion === globalVersion) return null;
 
   // Repo has newer skills than the installed package — do not downgrade
   if (semverGt(repoVersion, globalVersion)) {
     process.stderr.write(
-      `[refacil-sdd-ai] Repo uses methodology v${repoVersion} but the global package is v${globalVersion}. ` +
+      `[refacil-sdd-ai] Global install uses methodology v${repoVersion} but the global package is v${globalVersion}. ` +
       `Run: npm update -g refacil-sdd-ai\n`,
     );
     return null;
@@ -258,7 +291,7 @@ function syncRepoSkillsIfStale(globalVersion) {
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    writeRepoVersion(projectRoot, globalVersion);
+    writeGlobalVersion(globalVersion);
     return { from: repoVersion, to: globalVersion };
   } catch (_) {
     return { from: repoVersion, to: globalVersion, failed: true };
@@ -296,6 +329,25 @@ function checkUpdate() {
     }
   } catch (err) {
     process.stderr.write(`[refacil-sdd-ai] Could not remove legacy OpenSpec assets: ${err.message}\n`);
+  }
+
+  // Automatic cleanup of project-level refacil-* artifacts when global installation is active
+  try {
+    const home = os.homedir();
+    const globalActive =
+      fs.existsSync(path.join(globalClaudeDir(home), 'skills')) ||
+      fs.existsSync(path.join(globalCursorDir(home), 'skills')) ||
+      fs.existsSync(path.join(globalOpenCodeDir(home), 'skills'));
+
+    if (globalActive) {
+      const cleaned = removeProjectLevelArtifacts(projectRoot);
+      removeProjectLevelHooks(projectRoot);
+      if (cleaned > 0) {
+        process.stdout.write(`[refacil-sdd-ai] Cleaned up ${cleaned} project-level artifact(s) — global installation is active.\n`);
+      }
+    }
+  } catch (_) {
+    // Tolerant — cleanup should never break session startup
   }
 
   const { execSync } = require('child_process');
@@ -558,45 +610,59 @@ async function init() {
     return;
   }
 
+  // Persist the user's IDE selection — used by update and check-update as source of truth
+  writeSelectedIDEs(selectedIDEs);
+
   const installClaude = selectedIDEs.includes('.claude');
   const installCursor = selectedIDEs.includes('.cursor');
   const installOpenCode = selectedIDEs.includes('.opencode');
+  const homeDir = os.homedir();
 
-  const count = installSkills(packageRoot, projectRoot, selectedIDEs);
-  const ideList = selectedIDEs.map((d) => `${d}/skills/`).join(', ');
+  // Migration step: remove project-level artifacts (now global) — silent, non-destructive
+  try {
+    removeProjectLevelArtifacts(projectRoot);
+    removeProjectLevelHooks(projectRoot);
+  } catch (_) {
+    // Tolerant — migration cleanup should not block installation
+  }
+
+  const count = installSkills(packageRoot, homeDir, selectedIDEs);
+  const ideList = selectedIDEs.map((d) => {
+    if (d === '.claude') return `~/.claude/skills/`;
+    if (d === '.cursor') return `~/.cursor/skills/`;
+    return `(opencode-global)/skills/`;
+  }).join(', ');
   console.log(`  ${count} skills installed in ${ideList}`);
 
-  const agentsCount = installAgents(packageRoot, projectRoot, selectedIDEs);
+  const agentsCount = installAgents(packageRoot, homeDir, selectedIDEs);
   if (agentsCount > 0) {
-    const agentList = selectedIDEs.map((d) => `${d}/agents/`).join(', ');
+    const agentList = selectedIDEs.map((d) => {
+      if (d === '.claude') return `~/.claude/agents/`;
+      if (d === '.cursor') return `~/.cursor/agents/`;
+      return `(opencode-global)/agents/`;
+    }).join(', ');
     console.log(`  ${agentsCount} sub-agents installed in ${agentList}`);
   }
 
-  writeRepoVersion(projectRoot, getPackageVersion(packageRoot));
+  writeGlobalVersion(getPackageVersion(packageRoot));
 
   if (installClaude) {
     if (createClaudeMd(packageRoot, projectRoot)) console.log('  CLAUDE.md OK');
-    if (installHooks('.claude', projectRoot)) {
-      console.log('  Hook check-update added to .claude/settings.json');
+    if (installHooks('.claude', homeDir, projectRoot)) {
+      console.log('  Hook check-update added to ~/.claude/settings.json');
     }
   }
 
   if (installCursor) {
     if (createCursorRules(packageRoot, projectRoot)) console.log('  .cursorrules OK');
-    if (installHooks('.cursor', projectRoot)) {
-      console.log('  Hook check-update added to .cursor/hooks.json');
+    if (installHooks('.cursor', homeDir, projectRoot)) {
+      console.log('  Hook check-update added to ~/.cursor/hooks.json');
     }
   }
 
   if (installOpenCode) {
-    try {
-      installOpenCodeJson(projectRoot);
-      console.log('  .opencode/opencode.json created/updated');
-    } catch (err) {
-      console.error(`  Warning: could not create opencode.json: ${err.message}`);
-    }
-    if (installHooks('.opencode', projectRoot)) {
-      console.log('  OpenCode plugin installed to .opencode/plugins/refacil-hooks.js');
+    if (installHooks('.opencode', homeDir, projectRoot)) {
+      console.log('  OpenCode plugin installed to global plugins directory');
     }
   }
 
@@ -637,27 +703,58 @@ async function init() {
 function update() {
   console.log('\n  refacil-sdd-ai: Updating skills...\n');
 
-  // Detect installed IDEs by folder presence
-  const hasClaudeDir = fs.existsSync(path.join(projectRoot, '.claude'));
-  const hasCursorDir = fs.existsSync(path.join(projectRoot, '.cursor'));
-  const hasOpenCodeDir = fs.existsSync(path.join(projectRoot, '.opencode'));
+  const homeDir = os.homedir();
 
-  const detectedIDEs = [
-    hasClaudeDir && '.claude',
-    hasCursorDir && '.cursor',
-    hasOpenCodeDir && '.opencode',
-  ].filter(Boolean);
+  // Source of truth: persisted selection from init.
+  // Fall back to detection for backward compat (users who had the methodology installed
+  // before selected-ides.json existed). In that case, infer selection from IDE dirs
+  // already present in this repo and persist the result so future runs use the file.
+  let selectedIDEs = readSelectedIDEs();
+  if (!selectedIDEs) {
+    const detectedIds = detectInstalledIDEs();
+    const hasClaudeDir = detectedIds.includes('claude') ||
+      fs.existsSync(path.join(globalClaudeDir(homeDir), 'skills')) ||
+      fs.existsSync(path.join(projectRoot, '.claude'));
+    const hasCursorDir = detectedIds.includes('cursor') ||
+      fs.existsSync(path.join(globalCursorDir(homeDir), 'skills')) ||
+      fs.existsSync(path.join(projectRoot, '.cursor'));
+    const hasOpenCodeDir = detectedIds.includes('opencode') ||
+      fs.existsSync(path.join(globalOpenCodeDir(homeDir), 'skills')) ||
+      fs.existsSync(path.join(projectRoot, '.opencode'));
+    selectedIDEs = [
+      hasClaudeDir && '.claude',
+      hasCursorDir && '.cursor',
+      hasOpenCodeDir && '.opencode',
+    ].filter(Boolean);
+    // Persist for future runs so detection only happens once
+    if (selectedIDEs.length > 0) writeSelectedIDEs(selectedIDEs);
+  }
 
-  const count = installSkills(packageRoot, projectRoot, detectedIDEs);
-  const installedDirs = detectedIDEs.map((d) => `${d}/skills/`);
+  const hasClaudeDir = selectedIDEs.includes('.claude');
+  const hasCursorDir = selectedIDEs.includes('.cursor');
+  const hasOpenCodeDir = selectedIDEs.includes('.opencode');
+  const detectedIDEs = selectedIDEs;
+
+  // Migration step: remove project-level artifacts — silent, non-destructive
+  try {
+    removeProjectLevelArtifacts(projectRoot);
+    removeProjectLevelHooks(projectRoot);
+  } catch (_) {}
+
+  const count = installSkills(packageRoot, homeDir, detectedIDEs);
+  const installedDirs = detectedIDEs.map((d) => {
+    if (d === '.claude') return '~/.claude/skills/';
+    if (d === '.cursor') return '~/.cursor/skills/';
+    return '(opencode-global)/skills/';
+  });
   console.log(`  ${count} skills updated in ${installedDirs.join(', ') || '(none detected)'}`);
 
-  const agentsCount = installAgents(packageRoot, projectRoot, detectedIDEs);
+  const agentsCount = installAgents(packageRoot, homeDir, detectedIDEs);
   if (agentsCount > 0) {
     const agentDirs = [
-      hasClaudeDir && '.claude/agents/',
-      hasCursorDir && '.cursor/agents/',
-      hasOpenCodeDir && '.opencode/agents/',
+      hasClaudeDir && '~/.claude/agents/',
+      hasCursorDir && '~/.cursor/agents/',
+      hasOpenCodeDir && '(opencode-global)/agents/',
     ].filter(Boolean);
     console.log(`  ${agentsCount} sub-agents updated in ${agentDirs.join(', ')}`);
   }
@@ -671,30 +768,24 @@ function update() {
     process.stderr.write(`[refacil-sdd-ai] Could not remove legacy OpenSpec assets: ${err.message}\n`);
   }
 
-  writeRepoVersion(projectRoot, getPackageVersion(packageRoot));
-
+  writeGlobalVersion(getPackageVersion(packageRoot));
   if (hasClaudeDir) {
     createClaudeMd(packageRoot, projectRoot);
-    if (installHooks('.claude', projectRoot)) {
-      console.log('  Hook check-update added to .claude/settings.json');
+    if (installHooks('.claude', homeDir, projectRoot)) {
+      console.log('  Hook check-update added to ~/.claude/settings.json');
     }
   }
 
   if (hasCursorDir) {
     createCursorRules(packageRoot, projectRoot);
-    if (installHooks('.cursor', projectRoot)) {
-      console.log('  Hook check-update added to .cursor/hooks.json');
+    if (installHooks('.cursor', homeDir, projectRoot)) {
+      console.log('  Hook check-update added to ~/.cursor/hooks.json');
     }
   }
 
   if (hasOpenCodeDir) {
-    try {
-      installOpenCodeJson(projectRoot);
-    } catch (err) {
-      console.error(`  Warning: could not update opencode.json: ${err.message}`);
-    }
-    if (installHooks('.opencode', projectRoot)) {
-      console.log('  OpenCode plugin updated at .opencode/plugins/refacil-hooks.js');
+    if (installHooks('.opencode', homeDir, projectRoot)) {
+      console.log('  OpenCode plugin updated in global config directory');
     }
   }
 
@@ -731,28 +822,44 @@ function update() {
 function clean() {
   console.log('\n  refacil-sdd-ai: Removing skills...\n');
 
+  const homeDir = os.homedir();
+
+  const selectedIDEs = readSelectedIDEs() || ['claude', 'cursor', 'opencode'];
+  const globalCount = removeGlobalSkills(homeDir, selectedIDEs);
+  if (globalCount > 0) {
+    console.log(`  ${globalCount} global skills removed from IDE user directories`);
+  }
+
   const count = removeSkills(projectRoot);
-  console.log(`  ${count} skills removed from .claude/skills/ and .cursor/skills/`);
+  if (count > 0) {
+    console.log(`  ${count} project-level skills removed from .claude/skills/ and .cursor/skills/`);
+  }
 
-  if (uninstallHooks('.claude', projectRoot)) {
-    console.log('  SDD-AI hooks removed from .claude/settings.json');
+  if (uninstallHooks('.claude', homeDir)) {
+    console.log('  SDD-AI hooks removed from ~/.claude/settings.json');
   } else {
-    console.log('  No SDD-AI hooks found to remove in .claude/settings.json.');
+    console.log('  No SDD-AI hooks found to remove in ~/.claude/settings.json.');
   }
-  if (uninstallHooks('.cursor', projectRoot)) {
-    console.log('  SDD-AI hooks removed from .cursor/settings.json');
+  if (uninstallHooks('.cursor', homeDir)) {
+    console.log('  SDD-AI hooks removed from ~/.cursor/hooks.json');
   }
 
-  // Clean OpenCode artifacts if .opencode/ directory is present
+  // Always attempt to uninstall the global OpenCode plugin
+  try {
+    if (uninstallOpenCodePlugin(homeDir)) {
+      console.log('  OpenCode plugin removed from global plugins directory');
+    }
+  } catch (err) {
+    console.error(`  Warning: could not remove OpenCode plugin: ${err.message}`);
+  }
+
+  // Clean project-level OpenCode artifacts if .opencode/ directory is present
   if (fs.existsSync(path.join(projectRoot, '.opencode'))) {
     try {
       removeOpenCodeArtifacts(projectRoot);
       console.log('  OpenCode skills and agents removed from .opencode/');
     } catch (err) {
       console.error(`  Warning: could not remove OpenCode artifacts: ${err.message}`);
-    }
-    if (uninstallOpenCodePlugin(projectRoot)) {
-      console.log('  OpenCode plugin removed from .opencode/plugins/');
     }
   }
 
@@ -772,15 +879,21 @@ function clean() {
 }
 
 function help() {
+  const home = os.homedir();
+  const claudePath = globalClaudeDir(home);
+  const cursorPath = globalCursorDir(home);
+  const opencodePath = globalOpenCodeDir(home);
+
   console.log(`
   refacil-sdd-ai — SDD-AI Methodology
 
   Commands:
-    init          Install skills in .claude/, .cursor/ and/or .opencode/ (interactive IDE selector).
+    init          Install skills globally for Claude Code, Cursor and/or OpenCode (interactive IDE selector).
                   Use --all to install for all three IDEs without prompting.
                   Use --yes or --defaults to skip interactive branch config prompts.
                   Creates CLAUDE.md, .cursorrules and .opencode/opencode.json as appropriate.
-    update        Re-copy skills for all detected IDEs (.claude/, .cursor/, .opencode/)
+                  Migrates any project-level artifacts to global dirs automatically.
+    update        Re-copy skills for all detected IDEs to global user dirs
     migration-pending  Same validation as hooks/notify-update: list migrations (exit 1 if any; --json)
     check-update   Sync skills and compact-guidance at session start (SessionStart hook)
     notify-update  Notify methodology migration only if applicable (UserPromptSubmit hook)
@@ -821,8 +934,7 @@ function help() {
                       [--base-branch <branch>]      Base branch for new changes
                       [--protected-branches <csv>]  Protected branches (comma-separated)
                       [--artifact-language <lang>]  Artifact language: english (default) or spanish
-    clean         Remove skills and SDD-AI hooks from all detected IDEs
-                  (.claude/settings.json, .cursor/hooks.json, .opencode/plugins/)
+    clean         Remove SDD-AI hooks from global IDE config dirs and skills from global dirs
     help          Show this help
 
   Full flow:
@@ -831,10 +943,13 @@ function help() {
     3. RESTART your IDE session (Claude Code, Cursor, or OpenCode)
     4. Run: /refacil:setup (generates AGENTS.md for your project)
 
-  IDE support:
-    - Claude Code: .claude/skills/, .claude/agents/, .claude/settings.json hooks
-    - Cursor:      .cursor/skills/, .cursor/agents/, .cursor/hooks.json hooks
-    - OpenCode:    .opencode/skills/, .opencode/agents/, .opencode/plugins/refacil-hooks.js
+  Global installation paths (this machine):
+    - Claude Code: ${claudePath}/skills/, ${claudePath}/agents/
+                   ${claudePath}/settings.json (hooks)
+    - Cursor:      ${cursorPath}/skills/, ${cursorPath}/agents/
+                   ${cursorPath}/hooks.json (hooks)
+    - OpenCode:    ${opencodePath}/skills/, ${opencodePath}/agents/
+                   ${opencodePath}/plugins/refacil-hooks.js
 
   Requirements:
     - Node.js >= 20.0.0

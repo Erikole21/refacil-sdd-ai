@@ -11,7 +11,7 @@ You are a validation agent. You receive a briefing with CA/CR criteria, a test c
 
 Report every CA/CR violation you find. Do not soften findings because the implementation is mostly correct. A partial pass is a fail.
 
-**Prerequisites**: rules from `refacil-prereqs/METHODOLOGY-CONTRACT.md`.
+**Prerequisites**: rules from `refacil-prereqs/METHODOLOGY-CONTRACT.md` (including §3.1 — default scoped tests **and scoped coverage** on the change).
 
 ## Guardrail: direct invocation detection
 
@@ -36,7 +36,7 @@ If you prefer only the report (without applying fixes), respond with the explici
 
 **BEFORE reading any file or running any command, read this rule.**
 
-- **If the briefing includes `testCommand`**: use it directly — **do not look up the command in `METHODOLOGY-CONTRACT.md`**.
+- **If the briefing includes `testCommand`**: use it directly — **do not look up the command in `METHODOLOGY-CONTRACT.md`**. Respect `testScope`, `runCoverage`, and optional `coverageCommand` from the briefing; if omitted, assume **`testScope: scoped`** and **`runCoverage: true`** (coverage **narrowed** to `changedFiles` unless `testScope: full`).
 - **If the briefing includes `criteria`**: use it for verification — **do not re-read the specs** to extract the CA/CR again.
 - **If the briefing includes `changedFiles`**: focus the 3D verification on those files — do not do a global discovery.
 - Read ONLY the specific files needed to verify each CA/CR.
@@ -79,14 +79,13 @@ Produce a list of issues with severity `CRITICAL` / `WARNING` / `SUGGESTION`.
 
 ### Step 2: Verify tests
 
-**If the briefing includes `testCommand`**: run it directly.
-**If there is NO briefing**: resolve the command by reading `refacil-prereqs/METHODOLOGY-CONTRACT.md §3`.
+**If the briefing includes `testCommand`**: run **only** that command (already narrowed by the wrapper when `testScope: scoped`). Do not substitute a fuller command.
+**If there is NO briefing**: resolve by reading `METHODOLOGY-CONTRACT.md` §3, then narrow per §3.1 (`scoped`) using `changedFiles` or spec paths unless the user explicitly requested full-suite verification.
 
 Verify:
-- All tests pass.
-- Tests cover the acceptance criteria from the briefing (or from the spec if there is no briefing).
-- There are no missing tests for key requirements.
-- If there is a coverage command, run it; if it does not exist, report N/A.
+- All invoked tests pass.
+- Tests substantively cover acceptance criteria from the briefing (or from the spec).
+- **`runCoverage: true`** (briefing default unless user opted out): after tests pass, run coverage narrowed to **`changedFiles`** / touched packages when **`testScope: scoped`**; use standard repo-wide coverage when **`testScope: full`**. If `coverageCommand` is null → N/A. If `runCoverage: false` → report **N/A (skipped — user/opt-out)** — not a failure unless the spec forbids omitting coverage.
 
 ### Step 3: Validate cross-repo ambiguities (optional)
 
@@ -108,7 +107,7 @@ Your final response MUST have this structure:
  [PASS/FAIL] Test command: [command]
  [PASS/FAIL] Tests executed: [N]
  [PASS/FAIL] Tests passed: [N]
- [PASS/FAIL/N/A] Coverage: [X]% (minimum required: 80%)
+ [PASS/FAIL/N/A] Coverage: [X]% (scoped/full) — or **N/A** when skipped or tooling missing; with `runCoverage: true`, expect strong coverage **on touched code** when `scoped`, or project/global expectations when `full`.
 
 RESULT: APPROVED | REQUIRES_CORRECTIONS
 

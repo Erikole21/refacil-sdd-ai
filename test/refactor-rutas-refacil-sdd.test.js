@@ -8,7 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { globalClaudeDir } = require('../lib/global-paths');
 
 // ROOT apunta a refacil-sdd-ai/
 const ROOT = path.join(__dirname, '..');
@@ -36,10 +38,10 @@ const AUDITOR_MD     = path.join(ROOT, 'agents', 'auditor.md');
 const DEBUGGER_MD    = path.join(ROOT, 'agents', 'debugger.md');
 const VALIDATOR_MD   = path.join(ROOT, 'agents', 'validator.md');
 
-// ── Rutas de agentes instalados en .claude/agents/ ──
-const CLAUDE_PROPOSER    = path.join(REPO_ROOT, '.claude', 'agents', 'refacil-proposer.md');
-const CLAUDE_IMPLEMENTER = path.join(REPO_ROOT, '.claude', 'agents', 'refacil-implementer.md');
-const CLAUDE_VALIDATOR   = path.join(REPO_ROOT, '.claude', 'agents', 'refacil-validator.md');
+// ── Rutas de agentes instalados en ~/.claude/agents/ (global desde imp-global-install) ──
+const CLAUDE_PROPOSER    = path.join(globalClaudeDir(os.homedir()), 'agents', 'refacil-proposer.md');
+const CLAUDE_IMPLEMENTER = path.join(globalClaudeDir(os.homedir()), 'agents', 'refacil-implementer.md');
+const CLAUDE_VALIDATOR   = path.join(globalClaudeDir(os.homedir()), 'agents', 'refacil-validator.md');
 
 // ── Helpers ──
 function readFile(filePath) {

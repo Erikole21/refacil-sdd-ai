@@ -1,6 +1,6 @@
 {
   "name": "refacil-sdd-ai",
-  "version": "5.0.5",
+  "version": "5.1.1",
   "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor and OpenCode",
   "bin": {
     "refacil-sdd-ai": "./bin/cli.js"

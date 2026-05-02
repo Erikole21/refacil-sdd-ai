@@ -19,49 +19,62 @@ Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, and **Op
 
 ## Installation
 
-Recommended: install globally once, then run `init` per repo.
+### Step 1 — Install the package globally
 
 ```bash
-# 1. Global (once)
 npm install -g refacil-sdd-ai
-
-# 2. In the repo root
-refacil-sdd-ai init
-#    Interactive IDE selector (Claude Code / Cursor / OpenCode) — pre-selects IDEs
-#    whose folder already exists. Use --all to install for all three without prompting.
-#    Copies skills and sub-agents to the selected IDEs, configures hooks,
-#    and creates/updates .claudeignore, .cursorignore and .opencodeignore.
-#    Also prompts for global branch config (baseBranch, protectedBranches, artifactLanguage)
-#    pre-filled from ~/.refacil-sdd-ai/config.yaml. Skipped with --yes or --defaults.
-
-# 3. Restart your IDE session
-#    (new skills are not detected until you restart)
-
-# 4. In the IDE
-/refacil:setup
-#    Generates AGENTS.md and the .agents/ directory for the project
 ```
+
+### Step 2 — Run `init` to install skills into your IDEs
+
+```bash
+refacil-sdd-ai init
+```
+
+`init` installs skills, sub-agents, and hooks into your IDE's **global user directories** (`~/.claude/`, `~/.cursor/`, `~/.config/opencode/`). Skills are available in all your repos from this point — no need to re-run `init` when you open a new repo.
+
+- Interactive IDE selector (Claude Code / Cursor / OpenCode) — pre-selects installed IDEs.  
+  Use `--all` to install for all three without prompting.
+- Your IDE selection is saved to `~/.refacil-sdd-ai/selected-ides.json` and reused on every `update`.
+- Also prompts for global branch config (`baseBranch`, `protectedBranches`, `artifactLanguage`)  
+  stored in `~/.refacil-sdd-ai/config.yaml`. Skip with `--yes` or `--defaults`.
+
+Re-run `init` if you install a new IDE or want to change which IDEs have the methodology.
+
+**After `init`, restart your IDE session** — new skills are not detected until you restart.
+
+### Step 3 — Configure each repo with `/refacil:setup`
+
+In each repo where you want to use the methodology, open the IDE and run:
+
+```
+/refacil:setup
+```
+
+This generates `AGENTS.md` and the `.agents/` project index for that repo. It is the only step required per repo. Skills will prompt you to run it if it has not been done yet.
 
 ### Adding a new IDE to an existing installation
 
-If you already have the methodology installed for Claude Code or Cursor and want to add OpenCode (or any other IDE), just run `init` again from the repo root:
+To add an IDE that was not selected during the original `init`, run `init` again:
 
 ```bash
 refacil-sdd-ai init
 ```
 
-The selector will pre-select the IDEs whose folders already exist (`.claude/`, `.cursor/`). Check the new IDE you want to add (e.g. OpenCode), leave the existing ones checked, and confirm — only the newly selected IDE will receive files; existing installations are refreshed in place.
+The selector pre-marks your previously selected IDEs (from `~/.refacil-sdd-ai/selected-ides.json`). Check the new IDE, leave the others checked, and confirm — the new IDE is added and the selection is updated.
 
-> **`update` does not add new IDEs** — it only updates IDEs already installed. Use `init` to add a new one.
+> **`update` does not add new IDEs** — it only updates the IDEs already in your selection. Use `init` to add a new one.
 
 ### Update
 
 ```bash
 npm update -g refacil-sdd-ai
-refacil-sdd-ai update          # in each repo where it is used
+refacil-sdd-ai update
 ```
 
-`update` detects which IDEs are installed by folder presence (`.claude/`, `.cursor/`, `.opencode/`) and only updates those — it never creates IDE directories that did not exist before. In Claude Code and Cursor the `check-update` hook (every session) syncs skills and `compact-guidance`. In OpenCode the equivalent runs via the `session.created` handler of the embedded plugin (`.opencode/plugins/refacil-hooks.js`). Only if the automatic detection (`lib/methodology-migration-pending.js`) finds a pending methodology migration does it write the flag and allow `notify-update` / `tui.prompt.append` to prompt `/refacil:update`. If there is no migration, the user is not interrupted. The `/refacil:update` skill uses `refacil-sdd-ai migration-pending` as the same criterion.
+`update` reads `~/.refacil-sdd-ai/selected-ides.json` (the selection saved during `init`) and only updates those IDEs — it never touches IDEs you did not select. You do not need to run `update` per repo; it operates on the global install.
+
+In Claude Code and Cursor the `check-update` hook (every session) syncs skills and `compact-guidance` automatically. It also cleans up any leftover project-level `refacil-*` artifacts from older installations and prints a message if it removes anything. In OpenCode the equivalent runs via the `session.created` handler of the embedded plugin. Only if a pending methodology migration is detected does the hook prompt `/refacil:update` — otherwise the user is not interrupted.
 
 ### Uninstall
 
@@ -76,10 +89,10 @@ npm uninstall -g refacil-sdd-ai
 
 | Command | Description |
 |---|---|
-| `refacil-sdd-ai init` | Install skills and hooks in the current repo |
-| `refacil-sdd-ai update` | Re-copy skills and hooks to the latest version |
+| `refacil-sdd-ai init` | Install skills and hooks into global IDE user directories |
+| `refacil-sdd-ai update` | Re-copy skills and hooks to the latest version (global) |
 | `refacil-sdd-ai migration-pending [--json]` | Same detection as hooks/`notify-update`; exit 1 if migration is pending; on exit 0 also deletes obsolete `.refacil-pending-update` (same as at the start of `check-update`) |
-| `refacil-sdd-ai clean` | Remove SDD-AI skills and hooks from the repo |
+| `refacil-sdd-ai clean` | Remove SDD-AI skills and hooks from global IDE user directories |
 | `refacil-sdd-ai help` | Show help |
 
 ### Internal hooks (invoked automatically — not for manual use)
@@ -171,7 +184,7 @@ refacil-sdd-ai sdd config --json
 
 > The `join/leave/say/ask/reply/attend/inbox` subcommands also exist as **IDE skills** (`/refacil:join`, etc.). In most cases use the skills; the CLI commands are for scripting or debugging.
 >
-> **Cross-repo coordination** (ask requests, room agreements, `/refacil:propose`, closing to the requester): after `init`, the file **`BUS-CROSS-REPO.md`** is available in `.claude/skills/refacil-prereqs/` and `.cursor/skills/refacil-prereqs/`.
+> **Cross-repo coordination** (ask requests, room agreements, `/refacil:propose`, closing to the requester): after `init`, the file **`BUS-CROSS-REPO.md`** is available in `~/.claude/skills/refacil-prereqs/` and `~/.cursor/skills/refacil-prereqs/`.
 
 ---
 
@@ -307,7 +320,7 @@ Installed during `init` / `update` for each selected IDE. The same four behavior
 
 | Behavior | Claude Code | Cursor | OpenCode |
 |---|---|---|---|
-| **check-update** | `SessionStart` hook in `.claude/settings.json` | `SessionStart` hook in `.cursor/settings.json` | `session.created` handler in `.opencode/plugins/refacil-hooks.js` |
+| **check-update** | `SessionStart` hook in `~/.claude/settings.json` | `SessionStart` hook in `~/.cursor/hooks.json` | `session.created` handler in the global OpenCode plugin |
 | **notify-update** | `UserPromptSubmit` hook | `beforeSubmitPrompt` hook | `tui.prompt.append` handler |
 | **compact-bash** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool |
 | **check-review** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool |
@@ -319,7 +332,7 @@ Installed during `init` / `update` for each selected IDE. The same four behavior
 | `compact-bash` | Silently rewrites bare Bash commands. No extra turns, the IDE does not see the change. Requires Claude Code >= 2.1.89 for the `updatedInput` path. |
 | `check-review` | Intercepts `git push` and blocks if `.review-passed` is missing in any active change. |
 
-> **OpenCode plugin**: a single file (`.opencode/plugins/refacil-hooks.js`) implements all four behaviors. It loads `lib/compact/rules.js` from the package to reuse the same rewrite rules — no duplicated logic. If the rules file is not resolvable, compact-bash is disabled gracefully with a warning to stderr; the plugin never crashes the session.
+> **OpenCode plugin**: a single file installed in the global OpenCode plugins directory implements all four behaviors. It loads `lib/compact/rules.js` from the package to reuse the same rewrite rules — no duplicated logic. If the rules file is not resolvable, compact-bash is disabled gracefully with a warning to stderr; the plugin never crashes the session.
 
 > **Why two hooks for updates?** `SessionStart` does the silent sync when opening the session without user interaction. `notify-update` on `UserPromptSubmit` / `beforeSubmitPrompt` injects the instruction just before the agent processes the next user message, ensuring it is not ignored.
 
@@ -457,31 +470,41 @@ Local bus (WebSocket over `127.0.0.1`) so agents across different repos can comm
 
 ---
 
-## What Gets Installed in Your Repo
+## What Gets Installed
 
-Only the IDEs selected during `init` (or detected during `update`) receive files. The three IDE targets are independent — selecting only `.opencode` does not create `.claude/` or `.cursor/` directories.
+### Global user directories (once, shared across all repos)
+
+Skills, sub-agents, and hooks are installed into the user's global IDE directories — not into any project repo. Only the IDEs selected during `init` receive files.
 
 ```
 # Claude Code (if selected)
-.claude/skills/refacil-*/    # Skills (includes refacil-prereqs: METHODOLOGY-CONTRACT.md, BUS-CROSS-REPO.md, …)
-.claude/agents/refacil-*.md  # Read-only sub-agents: auditor, investigator, validator
-                             # Write sub-agents: tester, implementer, debugger, proposer
-.claude/settings.json        # Hooks: check-update + notify-update + check-review + compact-bash
-.claude/.sdd-version         # Installed methodology version (used by check-update)
+~/.claude/skills/refacil-*/    # Skills (includes refacil-prereqs: METHODOLOGY-CONTRACT.md, BUS-CROSS-REPO.md, …)
+~/.claude/agents/refacil-*.md  # Read-only sub-agents: auditor, investigator, validator
+                               # Write sub-agents: tester, implementer, debugger, proposer
+~/.claude/settings.json        # SDD hooks merged in: check-update, notify-update, check-review, compact-bash
 
 # Cursor (if selected)
-.cursor/skills/refacil-*/    # Cursor skills (equivalent)
-.cursor/agents/refacil-*.md  # Cursor sub-agents (readonly:true/false + model:inherit, auto-generated)
-.cursor/settings.json        # Hooks: check-update + notify-update + check-review + compact-bash
-.cursor/.sdd-version         # Installed methodology version
+~/.cursor/skills/refacil-*/    # Cursor skills (auto-transformed frontmatter: readonly + model:inherit)
+~/.cursor/agents/refacil-*.md  # Cursor sub-agents (readonly:true/false + model:inherit, auto-generated)
+~/.cursor/hooks.json           # SDD hooks merged in (same four behaviors)
 
-# OpenCode (if selected)
-.opencode/skills/refacil-*/       # OpenCode skills (byte-for-byte copy — same spec as Claude Code)
-.opencode/agents/refacil-*.md    # OpenCode sub-agents (permission block + mode:subagent, auto-generated)
-.opencode/plugins/refacil-hooks.js  # Embedded plugin: session.created + tui.prompt.append + tool.execute.before
-.opencode/opencode.json          # Created/merged with $schema (user keys preserved)
-.opencode/.sdd-version           # Installed methodology version
+# OpenCode (if selected)  — macOS/Linux: ~/.config/opencode/   Windows: %APPDATA%\opencode
+~/.config/opencode/skills/refacil-*/    # OpenCode skills
+~/.config/opencode/agents/refacil-*.md  # OpenCode sub-agents (permission block + mode:subagent)
+~/.config/opencode/plugins/refacil-hooks.js  # Plugin: session.created + tui.prompt.append + tool.execute.before
 
+# refacil-sdd-ai state
+~/.refacil-sdd-ai/
+  selected-ides.json           # IDE selection saved on init, reused by update
+  config.yaml                  # Global config: baseBranch, protectedBranches, artifactLanguage
+  sdd-version                  # Installed methodology version (used by check-update)
+```
+
+### Per repo (generated by `/refacil:setup`)
+
+The only per-repo step is running `/refacil:setup` once per project. It generates the project index — no IDE skills or hooks are written to the repo.
+
+```
 # Shared (IDE-agnostic)
 CLAUDE.md                    # Minimal index → points to AGENTS.md
 .cursorrules                 # Cursor format equivalent of CLAUDE.md
@@ -498,6 +521,8 @@ refacil-sdd/                 # SDD artifacts store
   changes/archive/           # Archived changes (moved here by /refacil:archive)
   specs/                     # Persistent specifications synced from archived changes
 ```
+
+> **Migration from project-level installs**: the `check-update` hook (SessionStart) automatically detects and removes any leftover project-level `refacil-*` skills, agents, hooks, and empty IDE directories from older versions.
 
 ---
 

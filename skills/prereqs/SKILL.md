@@ -14,14 +14,17 @@ Cross-cutting rules (states, branches, tests, output): `METHODOLOGY-CONTRACT.md`
 
 A skill requests this profile when it needs `AGENTS.md` to operate with the SDD-AI flow. These validations are mandatory on each execution of a skill that declares this profile.
 
-1. Read `AGENTS.md` from the root. If missing: *"AGENTS.md not found. Run `/refacil:setup`"* and **stop**.
+1. Read `AGENTS.md` from the root. If missing: stop with this message and **do not proceed**:
+   > **This repo has not been configured yet.**
+   > Run `/refacil:setup` to generate `AGENTS.md` and the `.agents/` project index — required before using any skill in this repo.
 2. If `AGENTS.md` includes a `compact-guidance` block, apply those token efficiency rules throughout the execution.
 
 Special case: in `refacil:explore`, `AGENTS.md` is active context throughout the entire exploration.
 
 ## `agents` profile
 
-Only requires `AGENTS.md`. If it exists, read it and apply `compact-guidance` if present. If missing: continue with generic baseline and inform the user: *"AGENTS.md not found; run `/refacil:setup` for project rules."*
+Only requires `AGENTS.md`. If it exists, read it and apply `compact-guidance` if present. If missing: continue with generic baseline and inform the user:
+*"`AGENTS.md` not found — run `/refacil:setup` once in this repo to enable full project context."*
 
 ## BUS-CROSS-REPO.md
 
