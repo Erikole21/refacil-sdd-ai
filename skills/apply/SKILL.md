@@ -113,8 +113,20 @@ Before invoking the sub-agent, extract the key context by reading the artifacts.
    - List of files to **create** (full paths)
    - List of files to **modify** (full paths)
 3. **Tasks** — read `refacil-sdd/changes/<changeName>/tasks.md`. Extract the full numbered list.
-4. **Test command** — read `refacil-prereqs/METHODOLOGY-CONTRACT.md` §3. Extract the exact command.
-5. **Architecture context** — read `.agents/stack.md` if it exists; if not, `.agents/architecture.md`; if neither exists, read only the first 60 lines of `AGENTS.md`. **Do not read the entire `.agents/` folder**.
+4. **`testScope`** — default **`scoped`**. Inspect `$ARGUMENTS` **and** the user message invoking this skill for explicit **whole-repo** regression (e.g. `full`, `all tests`, `whole suite`, `suite completa`, `suite completa del repo`). If present → **`testScope: full`**. Otherwise **`scoped`**.
+5. **`testCommand`** — read `refacil-prereqs/METHODOLOGY-CONTRACT.md` §3 for the baseline. If **`testScope: full`**, set **`testCommand`** to that baseline verbatim. If **`scoped`**, build a **narrowed** command per **§3.1** and the builder below (**never** silently run workspace-wide/monorepo root scripts that fan out to every package unless **every** scoped path warrants it — pick the smallest roots that cover **`scope.create` ∪ `scope.modify`**).
+6. **Architecture context** — read `.agents/stack.md` if it exists; if not, `.agents/architecture.md`; if neither exists, read only the first 60 lines of `AGENTS.md`. **Do not read the entire `.agents/` folder**.
+
+#### Scoped `testCommand` builder (apply — complements §3.1)
+
+1. **Baseline** — command from METHODOLOGY-CONTRACT §3 detection (respect `AGENTS.md` if it defines tests).
+2. **`T`** — sorted unique **`scope.create` ∪ `scope.modify`**. Omit entries that clearly do not justify a test run (`refacil-sdd/**/*.md` planning-only, etc.).
+3. If **`testScope: full`** or **`T`** is empty: **`testCommand` = baseline** (omit **`verificationWarning`** unless you document user intent).
+4. If **`scoped`** and **`T`** non-empty**:
+   - Prefer **narrowing instructions** documented in **`AGENTS.md`** or **`.agents/testing.md`** when present (follow them strictly).
+   - Otherwise use stack-aware suffixes/path filters documented for that toolchain (examples: **`pnpm exec jest`** / **`npm test`** with **`--`** + dirs or **`--testPathPattern`**, **`pytest`** paths, **`go test ./rel/...`**, **`cargo test -p member`**, **Gradle `-p`/`--tests`**, **Maven `-pl`/`-Dtest=`** — see METHODOLOGY-CONTRACT §3.1 **Scoped command patterns**).
+   - Pick the **smallest** dirs/modules covering all of **`T`**; include explicit test files from **`T`** when they exist.
+   - If narrowing is unsafe: **`testCommand` = baseline** and set **`verificationWarning: Scoped narrowing unavailable — falling back to baseline suite (high CPU/RAM)`**.
 
 Build the BRIEFING block that you will include literally in the delegation prompt:
 
@@ -130,7 +142,9 @@ tasks:
   1. <task 1>
   2. <task 2>
   ...
-testCommand: <exact command>
+testScope: scoped | full
+testCommand: <exact shell command Step 5 — narrowed when scoped>
+verificationWarning: <optional — set when scoped fallback hits baseline suite>
 architectureContext: |
   <extract from stack.md or first lines of AGENTS.md>
 specsNote: <"specs.md" | "specs/**/*.md" | "both — report contradictions in issues">

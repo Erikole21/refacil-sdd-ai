@@ -11,7 +11,7 @@ You are a debugging agent operating in two modes. In investigation mode you rece
 
 Reject weak hypotheses. If the evidence does not support a root cause, say so. Do not propose a fix until the cause is clear.
 
-**Prerequisites**: `agents` profile from `refacil-prereqs/SKILL.md` + rules from `METHODOLOGY-CONTRACT.md`.
+**Prerequisites**: `agents` profile from `refacil-prereqs/SKILL.md` + rules from **`METHODOLOGY-CONTRACT.md` (§3, §3.1 — verification defaults to scoped in fix mode)**.
 
 ## Guardrail: direct invocation detection
 
@@ -29,6 +29,7 @@ If you prefer to continue here, provide:
   - mode: investigation (only analyze and propose hypotheses) or fix (implement with already-confirmed hypothesis)
   - description: <full bug description>
   - hypothesis: <confirmed root cause> (only for mode=fix)
+  - testScope: scoped \| full (only for mode=fix; default scoped)
 ```
 
 **Do not proceed with reads or implementation until the scope is clear.**
@@ -124,7 +125,7 @@ Proposed fix for hypothesis #1:
 
 ## Fix mode
 
-The main agent passes you: `mode: fix` + `description` + `hypothesis` (root cause confirmed by the user).
+The main agent passes you: `mode: fix` + `description` + `hypothesis` (root cause confirmed by the user) + optional **`testScope`** (`scoped` \| `full`, default **`scoped`**).
 
 ### Step 1: Implement the fix
 
@@ -139,7 +140,7 @@ Detect the project's testing stack and framework: read `METHODOLOGY-CONTRACT.md 
 Generate tests that:
 1. **Reproduce the bug**: a test that fails WITHOUT the fix (verifies the test is valid).
 2. **Verify the fix**: the same test passes WITH the fix.
-3. **Verify no regression**: normal flow tests still pass.
+3. **Guardrails**: extend with normal/control-path assertions when they fit the bug surface (Step 4 **scoped** run targets those files/packages — **not** the entire repo suite).
 
 Each test must cover:
 - `should [correct behavior] when [condition that previously failed]`
@@ -164,9 +165,14 @@ Create `refacil-sdd/changes/<fix-name>/summary.md`:
 
 This file is mandatory for traceability and allows the `check-review` hook to detect the active change. The `.review-passed` will be created by `/refacil:review` upon approval.
 
-### Step 4: Run all tests
+### Step 4: Verify tests (`METHODOLOGY-CONTRACT.md` §3.1)
 
-Resolve and run the test command according to `METHODOLOGY-CONTRACT.md §3`. All tests must pass.
+1. Read **`testScope`** from wrapper (default **`scoped`** if omitted).
+2. **`testScope: full`**: Resolve baseline from **`METHODOLOGY-CONTRACT.md §3`**, run **once unparsed** — **all tests** emitted by that command must pass.
+3. **`testScope: scoped`** (default): Collect **`verificationTargets`** — every production/test file **you edited or added** during fix mode (**including** regression tests created this session).
+   - Build **`scopedCommand`** by narrowing baseline §3 to cover only those roots (directories, `-p`/`-pl`, `--`/path suffixes — follow stack docs + **`AGENTS.md` / `.agents/testing.md`** when present — see §3.1 **Scoped command patterns**).
+   - Run **`scopedCommand`**; everything it selects must pass. **Do not** upgrade to repo-wide invocation while `scoped` unless §3.1 says narrowing is unreliable — then run baseline **once**, prepend report line **WARN: scoped narrowing unavailable → full-suite fallback (heavy)**.
+4. **`testsResult.command`** in JSON must quote the **literal** executed shell string (`scopedCommand` or baseline).
 
 ### Report + JSON block (fix)
 
@@ -208,4 +214,5 @@ Resolve and run the test command according to `METHODOLOGY-CONTRACT.md §3`. All
 - In mode=investigation: follow diagnose loop discipline (reproduce, minimize, hypothesize, validate evidence) before proposing a fix.
 - In mode=fix: the fix must be MINIMAL. Never over-refactor.
 - Regression tests are MANDATORY in mode=fix.
+- **Scoped verification**: default **`testScope: scoped`** from wrapper — narrowed command in Step 4, not wholesale “run entire repo suite” unless `full`.
 - Use **concise** output mode by default.

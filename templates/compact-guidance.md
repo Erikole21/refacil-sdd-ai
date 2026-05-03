@@ -24,8 +24,8 @@ Rules to minimize context consumption when working in this repository.
 
 **Tests**
 - Report only failures; do not enumerate passes in visible output.
-- If the runner has a silent or summary mode (`jest --silent --reporters=summary`, `pytest -q`), use it.
-- If the runner is verbose by default, redirect: `2>&1 | tail -80`.
+- If the toolchain offers a quieter mode, use it (examples: **`pytest -q`**, **`jest --silent --reporters=summary`**, **`go test` with narrowed packages**, **`cargo test`** with `-p`/path filters — follow repo docs in `AGENTS.md` / `.agents/testing.md`).
+- If the runner is verbose by default, truncate or summarize (e.g. last lines of stderr) instead of dumping everything.
 
 **Logs and errors**
 - Do not paste full stack traces; extract only the relevant frame with the message.
@@ -33,7 +33,7 @@ Rules to minimize context consumption when working in this repository.
 - For log files: `tail -100` or filter by ERROR/WARN level.
 
 **Build and lint**
-- `tsc`, `eslint`, `biome`: group errors by file or by rule; do not enumerate line by line.
+- Type-check / lint (**stack-specific**: e.g. `tsc`, `eslint`, `ruff`, `mypy`, `golangci-lint`, `cargo clippy`, Maven/Gradle compile): group failures by file or rule; avoid line-by-line spam.
 - Successful build: confirm with a single line, do not paste the full output.
 - If there are many similar errors: show one example and the count.
 

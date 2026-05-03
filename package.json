@@ -1,7 +1,7 @@
 {
   "name": "refacil-sdd-ai",
-  "version": "5.1.1",
-  "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor and OpenCode",
+  "version": "5.2.0",
+  "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor, OpenCode and Codex",
   "bin": {
     "refacil-sdd-ai": "./bin/cli.js"
   },
@@ -22,6 +22,7 @@
     "claude-code",
     "cursor",
     "opencode",
+    "codex",
     "sdd",
     "specification-driven",
     "testing",
@@ -37,9 +38,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "test": "node --test test/hooks.test.js test/installer.test.js test/ignore-files.test.js test/methodology-migration-pending.test.js test/sdd.test.js test/config.test.js test/refactor-integrar-openspec-nativo.test.js test/refactor-rutas-refacil-sdd.test.js test/refactor-agents-english.test.js test/remove-openspec-legacy.test.js test/find-project-root.test.js test/opencode-installer.test.js test/opencode-plugin.test.js"
+    "test": "node --test test/hooks.test.js test/installer.test.js test/ignore-files.test.js test/methodology-migration-pending.test.js test/sdd.test.js test/config.test.js test/refactor-integrar-openspec-nativo.test.js test/refactor-rutas-refacil-sdd.test.js test/refactor-agents-english.test.js test/remove-openspec-legacy.test.js test/find-project-root.test.js test/opencode-installer.test.js test/opencode-plugin.test.js test/toml-converter.test.js test/testing-policy-sync.test.js test/session-repo-sync.test.js"
   },
   "dependencies": {
+    "smol-toml": "^1.6.1",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {

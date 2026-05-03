@@ -137,16 +137,19 @@ If the user does not approve at Gate 2, stop entirely. Do not create any branch.
 
 ### Step 5: Delegate implementation to the refacil-debugger sub-agent (mode: fix)
 
+**`testScope` for fix mode** — default **`scoped`**. Parse `$ARGUMENTS` **and** the user message invoking this skill for whole-repo regression (same tokens as apply: **`full`**, **`all tests`**, **`whole suite`**, **`suite completa`**). Pass **`testScope: full`** only when explicitly requested.
+
 Invoke the `refacil-debugger` sub-agent passing it:
 - `mode: fix`
 - `description`: complete bug description.
 - `hypothesis`: root cause confirmed by the user in Step 3.
+- `testScope`: `scoped` \| `full` — from the rule above (default **`scoped`**).
 
 The sub-agent:
 - Implements the minimal and focused fix.
-- Generates regression tests (reproduces the bug + verifies the fix + no regression).
+- Generates regression tests (reproduces the bug + verifies the fix + normal-path assertions where warranted).
 - Creates `refacil-sdd/changes/fix-<name>/summary.md` with traceability.
-- Runs all project tests.
+- Runs **`testCommand`** per **`METHODOLOGY-CONTRACT.md §3.1`** (narrowed when `scoped`; full baseline only when `full` or narrow fallback warns).
 - Returns the report fenced as ` ```refacil-debug-fix `.
 
 ### Step 6: Present result and next step

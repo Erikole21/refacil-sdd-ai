@@ -48,6 +48,7 @@ Run only the migrations that correspond to the detected reasons (see reference t
 1. Read the full content of `AGENTS.md`.
 2. Identify and separate content that must NOT move to `.agents/`:
    - `compact-guidance` block: between `<!-- refacil-sdd-ai:compact-guidance:start -->` and `<!-- refacil-sdd-ai:compact-guidance:end -->`
+   - `testing-policy` block in `.agents/testing.md`: between `<!-- refacil-sdd-ai:testing-policy:start -->` and `<!-- refacil-sdd-ai:testing-policy:end -->` (managed by the CLI on SessionStart — do not duplicate that policy prose elsewhere)
    - Bus presentation block: between `<!-- refacil-bus:presentation:start -->` and `<!-- refacil-bus:presentation:end -->`
    - Section `## SDD-AI Methodology`: table of `refacil:*` commands — always stays in `AGENTS.md`. If it exists, overwrite it with the updated table (see Step 6.2 of `refacil:setup`); if not, create it.
 3. Create the `.agents/` folder.
@@ -64,7 +65,7 @@ Run only the migrations that correspond to the detected reasons (see reference t
    - For each file in `.agents/`: area name + relative link + when to read it (one sentence).
    - Section `## SDD-AI Methodology` with the updated `refacil:*` command table (see Step 6.2 of `refacil:setup` for the exact content).
    - Managed blocks that already existed (compact-guidance, bus presentation) at the end, intact.
-   - If they did not exist, the compact-guidance block will be re-injected automatically at the next SessionStart.
+   - If they did not exist, **compact-guidance** and the **testing-policy** block in `.agents/testing.md` are re-injected automatically at the next **SessionStart** (`check-update`) or on `refacil-sdd-ai update` / `init`.
 
 ### Migration 2 and 3 — CLAUDE.md / .cursorrules → minimal index
 
@@ -98,7 +99,7 @@ If there were no changes (Step 1 gave exit 0), the obsolete flag usually clears 
 
 ## Step 5: Summary
 
-Report which files were created or modified. Mention that the `compact-guidance` block will be synced automatically at the next SessionStart.
+Report which files were created or modified. Mention that **`compact-guidance`** (in `AGENTS.md`) and the **`testing-policy`** block (in `.agents/testing.md` when `.agents/` exists) sync automatically at the next SessionStart or on `refacil-sdd-ai update`.
 
 ## Rules
 

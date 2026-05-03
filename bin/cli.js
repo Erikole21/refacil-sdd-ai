@@ -5,10 +5,9 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const {
-  syncCompactGuidance,
-  removeCompactGuidance,
-} = require('../lib/compact-guidance');
+const { removeCompactGuidance } = require('../lib/compact-guidance');
+const { removeTestingPolicyBlock } = require('../lib/testing-policy-sync');
+const { syncRepoSessionMarkers } = require('../lib/session-repo-sync');
 const compactBash = require('../lib/compact/bash');
 const {
   installSkills,
@@ -17,6 +16,7 @@ const {
   removeSkills,
   removeGlobalSkills,
   removeOpenCodeArtifacts,
+  removeCodexArtifacts,
   removeOpenspecLegacyAssets,
   removeProjectLevelArtifacts,
   createClaudeMd,
@@ -30,7 +30,7 @@ const {
   checkClaudeCodeVersion,
 } = require('../lib/installer');
 const { installHooks, uninstallHooks, cleanLegacySettingsHooks, installOpenCodePlugin, uninstallOpenCodePlugin, removeProjectLevelHooks } = require('../lib/hooks');
-const { globalClaudeDir, globalCursorDir, globalOpenCodeDir, readSelectedIDEs, writeSelectedIDEs } = require('../lib/global-paths');
+const { globalClaudeDir, globalCursorDir, globalOpenCodeDir, globalCodexDir, readSelectedIDEs, writeSelectedIDEs } = require('../lib/global-paths');
 const { detectInstalledIDEs } = require('../lib/ide-detection');
 const { handleCompact } = require('../lib/commands/compact');
 const { handleBus } = require('../lib/commands/bus');
@@ -131,7 +131,8 @@ function repoIsInitialized() {
   if (
     fs.existsSync(path.join(globalClaudeDir(home), 'skills')) ||
     fs.existsSync(path.join(globalCursorDir(home), 'skills')) ||
-    fs.existsSync(path.join(globalOpenCodeDir(home), 'skills'))
+    fs.existsSync(path.join(globalOpenCodeDir(home), 'skills')) ||
+    fs.existsSync(path.join(globalCodexDir(home), 'skills'))
   ) {
     return true;
   }
@@ -204,9 +205,9 @@ function readlineMultiSelect(options) {
  */
 async function selectIDEs() {
   const allFlag = process.argv.includes('--all');
-  const allIDEs = ['.claude', '.cursor', '.opencode'];
+  const allIDEs = ['.claude', '.cursor', '.opencode', '.codex'];
 
-  // --all or non-TTY: install all three
+  // --all or non-TTY: install all four
   if (allFlag || !process.stdout.isTTY) {
     return allIDEs;
   }
@@ -226,11 +227,15 @@ async function selectIDEs() {
   const openCodeSelected = hasSaved
     ? savedSelection.includes('.opencode')
     : detectedIds.includes('opencode') || fs.existsSync(path.join(projectRoot, '.opencode'));
+  const codexSelected = hasSaved
+    ? savedSelection.includes('.codex')
+    : detectedIds.includes('codex');
 
   const options = [
     { label: 'Claude Code (~/.claude/)', value: '.claude', selected: claudeSelected },
     { label: 'Cursor (~/.cursor/)', value: '.cursor', selected: cursorSelected },
     { label: 'OpenCode (global config dir)', value: '.opencode', selected: openCodeSelected },
+    { label: 'Codex (~/.codex/)', value: '.codex', selected: codexSelected },
   ];
 
   // Try @clack/prompts first, fall back to inline readline
@@ -337,7 +342,8 @@ function checkUpdate() {
     const globalActive =
       fs.existsSync(path.join(globalClaudeDir(home), 'skills')) ||
       fs.existsSync(path.join(globalCursorDir(home), 'skills')) ||
-      fs.existsSync(path.join(globalOpenCodeDir(home), 'skills'));
+      fs.existsSync(path.join(globalOpenCodeDir(home), 'skills')) ||
+      fs.existsSync(path.join(globalCodexDir(home), 'skills'));
 
     if (globalActive) {
       const cleaned = removeProjectLevelArtifacts(projectRoot);
@@ -354,9 +360,23 @@ function checkUpdate() {
   let localVersion = getPackageVersion(packageRoot);
 
   try {
-    syncCompactGuidance(projectRoot, packageRoot);
+    const syncOut = syncRepoSessionMarkers(projectRoot, packageRoot);
+    if (!syncOut.ok) {
+      process.stderr.write(`[refacil-sdd-ai] session repo sync: ${syncOut.reason}\n`);
+    } else {
+      if (syncOut.compact.status === 'error') {
+        process.stderr.write(`[refacil-sdd-ai] Could not sync compact-guidance: ${syncOut.compact.message}\n`);
+      }
+      if (syncOut.testing.status === 'error') {
+        process.stderr.write(`[refacil-sdd-ai] Could not sync testing-policy block: ${syncOut.testing.message}\n`);
+      } else if (
+        ['created-file', 'appended', 'replaced', 'written-empty'].includes(syncOut.testing.status)
+      ) {
+        process.stdout.write(`[refacil-sdd-ai] testing-policy: ${syncOut.testing.status} (.agents/testing.md)\n`);
+      }
+    }
   } catch (err) {
-    process.stderr.write(`[refacil-sdd-ai] Could not sync compact-guidance: ${err.message}\n`);
+    process.stderr.write(`[refacil-sdd-ai] session repo sync: ${err.message}\n`);
   }
 
   cleanLegacySettingsHooks(projectRoot);
@@ -616,6 +636,7 @@ async function init() {
   const installClaude = selectedIDEs.includes('.claude');
   const installCursor = selectedIDEs.includes('.cursor');
   const installOpenCode = selectedIDEs.includes('.opencode');
+  const installCodex = selectedIDEs.includes('.codex');
   const homeDir = os.homedir();
 
   // Migration step: remove project-level artifacts (now global) — silent, non-destructive
@@ -630,6 +651,7 @@ async function init() {
   const ideList = selectedIDEs.map((d) => {
     if (d === '.claude') return `~/.claude/skills/`;
     if (d === '.cursor') return `~/.cursor/skills/`;
+    if (d === '.codex') return `~/.codex/skills/`;
     return `(opencode-global)/skills/`;
   }).join(', ');
   console.log(`  ${count} skills installed in ${ideList}`);
@@ -639,6 +661,7 @@ async function init() {
     const agentList = selectedIDEs.map((d) => {
       if (d === '.claude') return `~/.claude/agents/`;
       if (d === '.cursor') return `~/.cursor/agents/`;
+      if (d === '.codex') return `~/.codex/agents/`;
       return `(opencode-global)/agents/`;
     }).join(', ');
     console.log(`  ${agentsCount} sub-agents installed in ${agentList}`);
@@ -666,6 +689,12 @@ async function init() {
     }
   }
 
+  if (installCodex) {
+    if (installHooks('.codex', homeDir)) {
+      console.log('  Hook check-update added to ~/.codex/config.toml');
+    }
+  }
+
   try {
     const IDE_TO_IGNORE = { '.claude': '.claudeignore', '.cursor': '.cursorignore', '.opencode': '.opencodeignore' };
     const ignoreResult = syncIgnoreFiles(projectRoot, selectedIDEs);
@@ -683,14 +712,29 @@ async function init() {
   }
 
   try {
-    const result = syncCompactGuidance(projectRoot, packageRoot);
-    if (result.status === 'appended') {
-      console.log('  compact-guidance block added to AGENTS.md');
-    } else if (result.status === 'replaced') {
-      console.log('  compact-guidance block updated in AGENTS.md');
+    const syncOut = syncRepoSessionMarkers(projectRoot, packageRoot);
+    if (!syncOut.ok) {
+      console.error(`  Warning: session repo sync: ${syncOut.reason}`);
+    } else {
+      if (syncOut.compact.status === 'error') {
+        console.error(`  Warning: could not sync compact-guidance: ${syncOut.compact.message}`);
+      } else if (syncOut.compact.status === 'appended') {
+        console.log('  compact-guidance block added to AGENTS.md');
+      } else if (syncOut.compact.status === 'replaced') {
+        console.log('  compact-guidance block updated in AGENTS.md');
+      }
+      if (syncOut.testing.status === 'error') {
+        console.error(`  Warning: could not sync testing-policy: ${syncOut.testing.message}`);
+      } else if (syncOut.testing.status === 'created-file') {
+        console.log('  testing-policy: created .agents/testing.md');
+      } else if (syncOut.testing.status === 'appended' || syncOut.testing.status === 'written-empty') {
+        console.log('  testing-policy block added to .agents/testing.md');
+      } else if (syncOut.testing.status === 'replaced') {
+        console.log('  testing-policy block updated in .agents/testing.md');
+      }
     }
   } catch (err) {
-    console.error(`  Warning: could not sync compact-guidance: ${err.message}`);
+    console.error(`  Warning: session repo sync: ${err.message}`);
   }
 
   console.log('\n  Next steps:\n');
@@ -721,10 +765,13 @@ function update() {
     const hasOpenCodeDir = detectedIds.includes('opencode') ||
       fs.existsSync(path.join(globalOpenCodeDir(homeDir), 'skills')) ||
       fs.existsSync(path.join(projectRoot, '.opencode'));
+    const hasCodexFallback = detectedIds.includes('codex') ||
+      fs.existsSync(path.join(globalCodexDir(homeDir), 'skills'));
     selectedIDEs = [
       hasClaudeDir && '.claude',
       hasCursorDir && '.cursor',
       hasOpenCodeDir && '.opencode',
+      hasCodexFallback && '.codex',
     ].filter(Boolean);
     // Persist for future runs so detection only happens once
     if (selectedIDEs.length > 0) writeSelectedIDEs(selectedIDEs);
@@ -733,6 +780,7 @@ function update() {
   const hasClaudeDir = selectedIDEs.includes('.claude');
   const hasCursorDir = selectedIDEs.includes('.cursor');
   const hasOpenCodeDir = selectedIDEs.includes('.opencode');
+  const hasCodexDir = selectedIDEs.includes('.codex');
   const detectedIDEs = selectedIDEs;
 
   // Migration step: remove project-level artifacts — silent, non-destructive
@@ -745,6 +793,7 @@ function update() {
   const installedDirs = detectedIDEs.map((d) => {
     if (d === '.claude') return '~/.claude/skills/';
     if (d === '.cursor') return '~/.cursor/skills/';
+    if (d === '.codex') return '~/.codex/skills/';
     return '(opencode-global)/skills/';
   });
   console.log(`  ${count} skills updated in ${installedDirs.join(', ') || '(none detected)'}`);
@@ -755,6 +804,7 @@ function update() {
       hasClaudeDir && '~/.claude/agents/',
       hasCursorDir && '~/.cursor/agents/',
       hasOpenCodeDir && '(opencode-global)/agents/',
+      hasCodexDir && '~/.codex/agents/',
     ].filter(Boolean);
     console.log(`  ${agentsCount} sub-agents updated in ${agentDirs.join(', ')}`);
   }
@@ -789,6 +839,12 @@ function update() {
     }
   }
 
+  if (hasCodexDir) {
+    if (installHooks('.codex', homeDir)) {
+      console.log('  Hook check-update updated in ~/.codex/config.toml');
+    }
+  }
+
   try {
     const IDE_TO_IGNORE = { '.claude': '.claudeignore', '.cursor': '.cursorignore', '.opencode': '.opencodeignore' };
     const ignoreResult = syncIgnoreFiles(projectRoot, detectedIDEs);
@@ -806,14 +862,29 @@ function update() {
   }
 
   try {
-    const result = syncCompactGuidance(projectRoot, packageRoot);
-    if (result.status === 'appended') {
-      console.log('  compact-guidance block added to AGENTS.md');
-    } else if (result.status === 'replaced') {
-      console.log('  compact-guidance block updated in AGENTS.md');
+    const syncOut = syncRepoSessionMarkers(projectRoot, packageRoot);
+    if (!syncOut.ok) {
+      console.error(`  Warning: session repo sync: ${syncOut.reason}`);
+    } else {
+      if (syncOut.compact.status === 'error') {
+        console.error(`  Warning: could not sync compact-guidance: ${syncOut.compact.message}`);
+      } else if (syncOut.compact.status === 'appended') {
+        console.log('  compact-guidance block added to AGENTS.md');
+      } else if (syncOut.compact.status === 'replaced') {
+        console.log('  compact-guidance block updated in AGENTS.md');
+      }
+      if (syncOut.testing.status === 'error') {
+        console.error(`  Warning: could not sync testing-policy: ${syncOut.testing.message}`);
+      } else if (syncOut.testing.status === 'created-file') {
+        console.log('  testing-policy: created .agents/testing.md');
+      } else if (syncOut.testing.status === 'appended' || syncOut.testing.status === 'written-empty') {
+        console.log('  testing-policy block added to .agents/testing.md');
+      } else if (syncOut.testing.status === 'replaced') {
+        console.log('  testing-policy block updated in .agents/testing.md');
+      }
     }
   } catch (err) {
-    console.error(`  Warning: could not sync compact-guidance: ${err.message}`);
+    console.error(`  Warning: session repo sync: ${err.message}`);
   }
 
   console.log('\n  RESTART your IDE session to apply the changes.\n');
@@ -853,6 +924,17 @@ function clean() {
     console.error(`  Warning: could not remove OpenCode plugin: ${err.message}`);
   }
 
+  // Remove Codex global artifacts (skills + agents) and hooks
+  try {
+    removeCodexArtifacts(homeDir);
+    console.log('  Codex skills and agents removed from ~/.codex/');
+  } catch (err) {
+    console.error(`  Warning: could not remove Codex artifacts: ${err.message}`);
+  }
+  if (uninstallHooks('.codex', homeDir)) {
+    console.log('  SDD-AI hooks removed from ~/.codex/config.toml');
+  }
+
   // Clean project-level OpenCode artifacts if .opencode/ directory is present
   if (fs.existsSync(path.join(projectRoot, '.opencode'))) {
     try {
@@ -872,6 +954,15 @@ function clean() {
     console.error(`  Warning: could not clean compact-guidance: ${err.message}`);
   }
 
+  try {
+    const tp = removeTestingPolicyBlock(projectRoot);
+    if (tp.status === 'removed') {
+      console.log('  testing-policy block removed from .agents/testing.md');
+    }
+  } catch (err) {
+    console.error(`  Warning: could not clean testing-policy: ${err.message}`);
+  }
+
   console.log('  AGENTS.md, CLAUDE.md and .cursorrules were not removed.');
   console.log('\n  Note: if you have openspec/ in the repo, migrate first with: refacil-sdd-ai sdd status');
   console.log('  (the openspec/ → refacil-sdd/ migration is automatic on any sdd subcommand)');
@@ -883,19 +974,20 @@ function help() {
   const claudePath = globalClaudeDir(home);
   const cursorPath = globalCursorDir(home);
   const opencodePath = globalOpenCodeDir(home);
+  const codexPath = globalCodexDir(home);
 
   console.log(`
   refacil-sdd-ai — SDD-AI Methodology
 
   Commands:
-    init          Install skills globally for Claude Code, Cursor and/or OpenCode (interactive IDE selector).
-                  Use --all to install for all three IDEs without prompting.
+    init          Install skills globally for Claude Code, Cursor, OpenCode and/or Codex (interactive IDE selector).
+                  Use --all to install for all four IDEs without prompting.
                   Use --yes or --defaults to skip interactive branch config prompts.
                   Creates CLAUDE.md, .cursorrules and .opencode/opencode.json as appropriate.
                   Migrates any project-level artifacts to global dirs automatically.
     update        Re-copy skills for all detected IDEs to global user dirs
     migration-pending  Same validation as hooks/notify-update: list migrations (exit 1 if any; --json)
-    check-update   Sync skills and compact-guidance at session start (SessionStart hook)
+    check-update   Sync skills, compact-guidance (AGENTS.md), and testing-policy block (.agents/testing.md) at session start
     notify-update  Notify methodology migration only if applicable (UserPromptSubmit hook)
     check-review   Verify that review has been completed (used by PreToolUse hook)
     compact-bash  Rewrite bare Bash commands to reduce tokens (used by PreToolUse hook)
@@ -940,7 +1032,7 @@ function help() {
   Full flow:
     1. npm install -g refacil-sdd-ai
     2. refacil-sdd-ai init
-    3. RESTART your IDE session (Claude Code, Cursor, or OpenCode)
+    3. RESTART your IDE session (Claude Code, Cursor, OpenCode, or Codex)
     4. Run: /refacil:setup (generates AGENTS.md for your project)
 
   Global installation paths (this machine):
@@ -950,6 +1042,8 @@ function help() {
                    ${cursorPath}/hooks.json (hooks)
     - OpenCode:    ${opencodePath}/skills/, ${opencodePath}/agents/
                    ${opencodePath}/plugins/refacil-hooks.js
+    - Codex:       ${codexPath}/skills/, ${codexPath}/agents/
+                   ${codexPath}/config.toml (hooks)
 
   Requirements:
     - Node.js >= 20.0.0

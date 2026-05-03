@@ -2,7 +2,7 @@
 
 **SDD-AI** (Specification-Driven Development with AI) packaged as a CLI.
 
-Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, and **OpenCode** that guide the developer through a structured AI-assisted development workflow, using **`refacil-sdd/`** as the specification store, plus a **local bus** so agents across different repos can communicate with each other.
+Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, **OpenCode**, and **Codex** that guide the developer through a structured AI-assisted development workflow, using **`refacil-sdd/`** as the specification store, plus a **local bus** so agents across different repos can communicate with each other.
 
 ---
 
@@ -11,9 +11,9 @@ Installs **skills** and **sub-agents** for **Claude Code**, **Cursor**, and **Op
 ## Requirements
 
 - **Node.js >= 20.0.0**
-- One or more supported IDEs: **Claude Code >= 2.1.89**, **Cursor**, or **OpenCode**
+- One or more supported IDEs: **Claude Code >= 2.1.89**, **Cursor**, **OpenCode**, or **Codex**
 
-`refacil-sdd-ai init` checks the Claude Code version and warns if it is below 2.1.89. With an older version the rest of the methodology works, but `compact-bash` will have no effect (Claude Code only — OpenCode and Cursor have their own hook delivery mechanisms).
+`refacil-sdd-ai init` checks the Claude Code version and warns if it is below 2.1.89. With an older version the rest of the methodology works, but `compact-bash` will have no effect (Claude Code only — Cursor, OpenCode, and Codex have their own hook delivery mechanisms).
 
 ---
 
@@ -33,8 +33,8 @@ refacil-sdd-ai init
 
 `init` installs skills, sub-agents, and hooks into your IDE's **global user directories** (`~/.claude/`, `~/.cursor/`, `~/.config/opencode/`). Skills are available in all your repos from this point — no need to re-run `init` when you open a new repo.
 
-- Interactive IDE selector (Claude Code / Cursor / OpenCode) — pre-selects installed IDEs.  
-  Use `--all` to install for all three without prompting.
+- Interactive IDE selector (Claude Code / Cursor / OpenCode / Codex) — pre-selects installed IDEs.  
+  Use `--all` to install for all four without prompting.
 - Your IDE selection is saved to `~/.refacil-sdd-ai/selected-ides.json` and reused on every `update`.
 - Also prompts for global branch config (`baseBranch`, `protectedBranches`, `artifactLanguage`)  
   stored in `~/.refacil-sdd-ai/config.yaml`. Skip with `--yes` or `--defaults`.
@@ -190,7 +190,7 @@ refacil-sdd-ai sdd config --json
 
 ## Available IDE Skills
 
-All invoked as `/refacil:<name>` in Claude Code, Cursor, or OpenCode.
+All invoked as `/refacil:<name>` in Claude Code, Cursor, OpenCode, or Codex.
 
 ### SDD cycle
 
@@ -227,7 +227,7 @@ Some skills delegate their heavy work to **sub-agents** that run in isolated con
 
 **Model**: `refacil-proposer` runs with `model: opusplan` (uses Opus during plan mode for highest-stakes planning, then switches to Sonnet for execution). Other sub-agents use `model: sonnet` by default for Claude Code, others use inherit model.
 
-**Triple-platform**: `.claude/agents/refacil-*.md` uses `tools:` (granular allowlist). `.cursor/agents/refacil-*.md` is auto-generated: `readonly: true` for agents without `Edit`/`Write`, `readonly: false` for those that have them; always `model: inherit`. `.opencode/agents/refacil-*.md` is auto-generated via `transformFrontmatterForOpenCode()`: converts `tools:` to a `permission:` block (`edit: allow/deny`, `bash: allow/deny`, `webfetch: deny`), adds `mode: subagent`, adds `hidden: true` for internal agents, and removes `model:`. The installer transforms the frontmatter automatically for all three IDEs.
+**Multi-platform**: `.claude/agents/refacil-*.md` uses `tools:` (granular allowlist). `.cursor/agents/refacil-*.md` is auto-generated: `readonly: true` for agents without `Edit`/`Write`, `readonly: false` for those that have them; always `model: inherit`. `.opencode/agents/refacil-*.md` is auto-generated via `transformFrontmatterForOpenCode()`: converts `tools:` to a `permission:` block (`edit: allow/deny`, `bash: allow/deny`, `webfetch: deny`), adds `mode: subagent`, adds `hidden: true` for internal agents, and removes `model:`. `.codex/agents/refacil-*.toml` is auto-generated via `convertAgentToToml()`: extracts `name` and `description` from the YAML frontmatter and places the Markdown body in `developer_instructions = """..."""`. The installer transforms the frontmatter automatically for all four IDEs.
 
 **Two-pass `refacil:bug` flow**: the wrapper first invokes the sub-agent in `investigation` mode (writes nothing) → the user confirms the hypothesis and approves the fix → the wrapper validates the working branch → invokes the sub-agent in `fix` mode to implement.
 
@@ -316,14 +316,14 @@ From there, the full cycle is:
 
 ## Automatic Hooks
 
-Installed during `init` / `update` for each selected IDE. The same four behaviors are active in Claude Code, Cursor, and OpenCode — each through its own delivery mechanism.
+Installed during `init` / `update` for each selected IDE. The same four behaviors are active in Claude Code, Cursor, OpenCode, and Codex — each through its own delivery mechanism.
 
-| Behavior | Claude Code | Cursor | OpenCode |
-|---|---|---|---|
-| **check-update** | `SessionStart` hook in `~/.claude/settings.json` | `SessionStart` hook in `~/.cursor/hooks.json` | `session.created` handler in the global OpenCode plugin |
-| **notify-update** | `UserPromptSubmit` hook | `beforeSubmitPrompt` hook | `tui.prompt.append` handler |
-| **compact-bash** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool |
-| **check-review** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool |
+| Behavior | Claude Code | Cursor | OpenCode | Codex |
+|---|---|---|---|---|
+| **check-update** | `SessionStart` hook in `~/.claude/settings.json` | `SessionStart` hook in `~/.cursor/hooks.json` | `session.created` handler in the global OpenCode plugin | `sessionStart` hook in `~/.codex/config.toml` |
+| **notify-update** | `UserPromptSubmit` hook | `beforeSubmitPrompt` hook | `tui.prompt.append` handler | `userPromptSubmit` hook in `~/.codex/config.toml` |
+| **compact-bash** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool | `preToolUse` hook (Bash matcher) in `~/.codex/config.toml` |
+| **check-review** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool | `preToolUse` hook (Bash matcher) in `~/.codex/config.toml` |
 
 | Behavior | What it does |
 |---|---|
@@ -333,6 +333,8 @@ Installed during `init` / `update` for each selected IDE. The same four behavior
 | `check-review` | Intercepts `git push` and blocks if `.review-passed` is missing in any active change. |
 
 > **OpenCode plugin**: a single file installed in the global OpenCode plugins directory implements all four behaviors. It loads `lib/compact/rules.js` from the package to reuse the same rewrite rules — no duplicated logic. If the rules file is not resolvable, compact-bash is disabled gracefully with a warning to stderr; the plugin never crashes the session.
+
+> **Codex hooks**: injected into `~/.codex/config.toml` under `[hooks]` with `[features] codex_hooks = true`. Each SDD-AI hook entry carries a boolean marker (`_sdd`, `_sdd_compact`, `_sdd_review`, `_sdd_notify`) for clean removal on `clean`. User-defined hooks outside these entries are preserved.
 
 > **Why two hooks for updates?** `SessionStart` does the silent sync when opening the session without user interaction. `notify-update` on `UserPromptSubmit` / `beforeSubmitPrompt` injects the instruction just before the agent processes the next user message, ensuring it is not ignored.
 
@@ -493,6 +495,11 @@ Skills, sub-agents, and hooks are installed into the user's global IDE directori
 ~/.config/opencode/agents/refacil-*.md  # OpenCode sub-agents (permission block + mode:subagent)
 ~/.config/opencode/plugins/refacil-hooks.js  # Plugin: session.created + tui.prompt.append + tool.execute.before
 
+# Codex (if selected)
+~/.codex/skills/refacil-*/             # Codex skills (same content as Claude Code)
+~/.codex/agents/refacil-*.toml         # Codex sub-agents (TOML: name + description + developer_instructions)
+~/.codex/config.toml                   # SDD hooks merged in under [hooks] with [features] codex_hooks = true
+
 # refacil-sdd-ai state
 ~/.refacil-sdd-ai/
   selected-ides.json           # IDE selection saved on init, reused by update
@@ -532,6 +539,7 @@ refacil-sdd/                 # SDD artifacts store
 - [Claude Code](https://claude.ai/code) — Anthropic CLI
 - [Cursor](https://cursor.sh) — AI IDE
 - [OpenCode](https://opencode.ai) — open-source AI development agent
+- [Codex](https://github.com/openai/codex) — OpenAI CLI agent
 
 ## License
 

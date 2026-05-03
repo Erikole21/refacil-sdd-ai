@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { installHooks, uninstallHooks } = require('../lib/hooks');
+const { installHooks, uninstallHooks, installCodexHooks, uninstallCodexHooks } = require('../lib/hooks');
 
 let tmpDir;
 
@@ -188,5 +188,166 @@ describe('CR-2: Claude Code usa settings.json, Cursor usa hooks.json', () => {
     const ch = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
     assert.ok(ch.hooks.sessionStart.some((h) => h._sdd));
     assert.ok(ch.hooks.beforeSubmitPrompt.some((h) => h._sdd_notify));
+  });
+});
+
+// ── Codex: CA-04 — installCodexHooks writes SDD hooks to ~/.codex/config.toml ─
+
+describe('CA-04: installCodexHooks writes SDD hooks to ~/.codex/config.toml', () => {
+  test('creates ~/.codex/config.toml with hooks entries on first run', () => {
+    installCodexHooks(tmpDir);
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    assert.ok(fs.existsSync(configPath), 'config.toml must be created');
+    const content = fs.readFileSync(configPath, 'utf8');
+    // smol-toml serializes array-of-tables as [[hooks.<event>]] — check for that pattern
+    assert.ok(
+      content.includes('[[hooks.') || content.includes('[hooks]'),
+      'config.toml must contain hooks entries ([[hooks.*]] or [hooks])',
+    );
+  });
+
+  test('includes [features] codex_hooks = true', () => {
+    installCodexHooks(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    assert.ok(content.includes('codex_hooks'), 'config.toml must include codex_hooks flag');
+  });
+
+  test('installs sessionStart SDD hook', () => {
+    installCodexHooks(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    assert.ok(content.includes('check-update'), 'sessionStart hook must contain check-update command');
+  });
+
+  test('installs preToolUse compact-bash and check-review hooks', () => {
+    installCodexHooks(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    assert.ok(content.includes('compact-bash'), 'preToolUse compact-bash hook must be present');
+    assert.ok(content.includes('check-review'), 'preToolUse check-review hook must be present');
+  });
+
+  test('installs userPromptSubmit notify-update hook', () => {
+    installCodexHooks(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    assert.ok(content.includes('notify-update'), 'userPromptSubmit notify-update hook must be present');
+  });
+
+  test('returns true on first installation', () => {
+    const result = installCodexHooks(tmpDir);
+    assert.equal(result, true, 'must return true on first install');
+  });
+
+  test('installHooks facade with .codex routes to installCodexHooks', () => {
+    const result = installHooks('.codex', tmpDir);
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    assert.ok(fs.existsSync(configPath), 'installHooks(.codex) must create config.toml');
+    assert.equal(result, true, 'installHooks(.codex) must return true on first install');
+  });
+
+  test('merges SDD hooks with existing non-SDD TOML content', () => {
+    fs.mkdirSync(path.join(tmpDir, '.codex'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.codex', 'config.toml'),
+      '[model]\ndefault = "o3"\n',
+    );
+    installCodexHooks(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    // Existing non-SDD key must still be present
+    assert.ok(content.includes('o3'), 'non-SDD model key must be preserved after merge');
+    // SDD hooks must have been added
+    assert.ok(content.includes('check-update'), 'SDD hooks must be added alongside existing content');
+  });
+});
+
+// ── Codex: CA-05 (hooks) — installCodexHooks is idempotent ──────────────────
+
+describe('CA-05 (hooks): installCodexHooks is idempotent', () => {
+  test('running installCodexHooks twice does not duplicate hooks', () => {
+    installCodexHooks(tmpDir);
+    const result2 = installCodexHooks(tmpDir);
+    assert.equal(result2, false, 'second run must return false (already up to date)');
+
+    const content = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
+    // Count occurrences of check-update — must be exactly one
+    const checkUpdateOccurrences = (content.match(/check-update/g) || []).length;
+    assert.equal(checkUpdateOccurrences, 1, 'check-update hook must not be duplicated');
+  });
+
+  test('installHooks(.codex) facade is idempotent', () => {
+    installHooks('.codex', tmpDir);
+    const result2 = installHooks('.codex', tmpDir);
+    assert.equal(result2, false, 'second call to installHooks(.codex) must return false');
+  });
+});
+
+// ── Codex: CA-06 (hooks) — uninstallCodexHooks / uninstallHooks('.codex') ───
+
+describe('CA-06 (hooks): uninstallCodexHooks removes SDD hooks from config.toml', () => {
+  test('removes SDD hooks after installCodexHooks', () => {
+    installCodexHooks(tmpDir);
+    uninstallCodexHooks(tmpDir);
+
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    // File may be deleted or kept — if kept, must not contain SDD hooks
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf8');
+      assert.ok(!content.includes('check-update'), 'check-update hook must be removed');
+      assert.ok(!content.includes('compact-bash'), 'compact-bash hook must be removed');
+      assert.ok(!content.includes('check-review'), 'check-review hook must be removed');
+      assert.ok(!content.includes('notify-update'), 'notify-update hook must be removed');
+    }
+  });
+
+  test('returns true when hooks were removed', () => {
+    installCodexHooks(tmpDir);
+    const result = uninstallCodexHooks(tmpDir);
+    assert.equal(result, true, 'must return true when SDD hooks were removed');
+  });
+
+  test('returns false when config.toml does not exist', () => {
+    const result = uninstallCodexHooks(tmpDir);
+    assert.equal(result, false, 'must return false when config.toml does not exist');
+  });
+
+  test('preserves non-SDD keys when removing SDD hooks', () => {
+    fs.mkdirSync(path.join(tmpDir, '.codex'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.codex', 'config.toml'),
+      '[model]\ndefault = "o3"\n',
+    );
+    installCodexHooks(tmpDir);
+    uninstallCodexHooks(tmpDir);
+
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    assert.ok(fs.existsSync(configPath), 'config.toml must still exist (has non-SDD content)');
+    const content = fs.readFileSync(configPath, 'utf8');
+    assert.ok(content.includes('o3'), 'non-SDD model key must be preserved after uninstall');
+  });
+
+  test('removes hooks entries when they become empty after uninstall', () => {
+    // Install hooks only (no other content in config.toml)
+    installCodexHooks(tmpDir);
+    uninstallCodexHooks(tmpDir);
+
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf8');
+      // Neither the array-of-table form [[hooks.*]] nor plain [hooks] should remain
+      assert.ok(
+        !content.includes('[[hooks.') && !content.includes('[hooks]'),
+        'hooks entries must be absent after uninstall when all hooks were SDD',
+      );
+    }
+    // If file does not exist after removal, that is also acceptable (fully cleaned up)
+  });
+
+  test('uninstallHooks(.codex) facade routes to uninstallCodexHooks', () => {
+    installHooks('.codex', tmpDir);
+    const result = uninstallHooks('.codex', tmpDir);
+    assert.equal(result, true, 'uninstallHooks(.codex) must return true when hooks were removed');
+  });
+
+  test('uninstallHooks(.codex) returns false when nothing to remove', () => {
+    const result = uninstallHooks('.codex', tmpDir);
+    assert.equal(result, false, 'uninstallHooks(.codex) must return false when nothing to remove');
   });
 });

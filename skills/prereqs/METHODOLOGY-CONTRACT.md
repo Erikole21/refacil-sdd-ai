@@ -32,9 +32,11 @@ Detection order:
 
 Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `pytest --cov`, etc.). If it does not exist, report N/A with justification.
 
-### §3.1 — Scoped test execution (default for `/refacil:test` and `/refacil:verify`)
+### §3.1 — Scoped test execution (default for `/refacil:test`, `/refacil:verify`, `/refacil:apply`, and debugger fix mode)
 
-**Goal**: avoid high RAM/CPU from **full-repo** suites and **repo-wide** coverage on every SDD step. Defaults exercise **tests + coverage only for what the change touches**; full regression stays **on-demand** (explicit skill arguments).
+**Goal**: avoid high RAM/CPU from **full-repo** suites and **repo-wide** coverage on every SDD step. Defaults exercise **tests + coverage only for what the change touches**; full regression stays **on-demand** (explicit skill arguments or unavoidable fallback).
+
+**Also applies**: `/refacil:apply` (implementer verification step) and `/refacil:bug` (debugger `mode=fix`) — wrappers pass `testScope` and a **`testCommand` already narrowed** when `scoped`, same rules as rows in the table below.
 
 | Briefing field | Values | Default |
 |----------------|--------|---------|
@@ -48,6 +50,8 @@ Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `p
 3. **`runCoverage: true`** (default): after scoped tests pass, run coverage **narrowed to the change** — instrument/collect only for **`filesToTest`**, **`changedFiles`**, and companion test/spec paths tied to those modules (examples: `--cov=pkg/sub`, Jest `--collectCoverageFrom` globs limited to touched trees, Gradle/JaCoCo scoped modules). If the toolchain cannot narrow, report **N/A** plus a WARNING; do **not** silently widen to repo-wide coverage while `testScope` remains `scoped`.
 4. **`runCoverage: false`**: skip coverage entirely — only when the user **explicitly** opts out (`no coverage`, `nocoverage`, `skip coverage`, `sin cobertura`, etc.) or the project defines **no** coverage command under §3.
 5. **`runCoverage: true` + `testScope: full`**: run the project coverage command **after** the full suite passes, using the repo’s usual global/module coverage behavior (heavy — intended only when the user requested `full`).
+6. **`/refacil:apply` / implementer**: the apply wrapper supplies `testScope` (default `scoped`) and **`testCommand`**. Implementer runs **only** `testCommand` for Step verification — no repo-wide substitution. Coverage is optional in that step unless the briefing adds an explicit coverage command (unusual; defer to `/refacil:test`).
+7. **`/refacil:bug` / debugger `mode=fix`**: debugger defaults to **`scoped`**, narrows §3 baseline to **`filesModified` ∪ new/updated regression test files** unless the wrapper passed **`testScope: full`**.
 
 **Scoped command patterns** (language-agnostic — sub-agent reads `AGENTS.md`, build config, and tool docs; run from the correct module/root):
 

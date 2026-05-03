@@ -13,6 +13,11 @@ let tmpDir;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-plugin-test-'));
+  // Plugin resolves `refacil-sdd-ai` from node_modules for session sync + methodologyMigrationPending
+  const pkgRoot = path.join(__dirname, '..');
+  const linkPath = path.join(tmpDir, 'node_modules', 'refacil-sdd-ai');
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(pkgRoot, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
 });
 
 afterEach(() => {
@@ -43,37 +48,30 @@ describe('plugin structure', () => {
 // ── session.created: check-update ───────────────────────────────────────────
 
 describe('session.created — check-update', () => {
-  test('escribe .refacil-pending-update cuando hay migración pendiente', async () => {
-    // Create a change directory with a pending task (- [ ])
-    const changesDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'test-change');
-    fs.mkdirSync(changesDir, { recursive: true });
-    fs.writeFileSync(path.join(changesDir, 'tasks.md'), '## Tasks\n- [ ] Task 1\n- [x] Task 2\n');
+  test('escribe .refacil-pending-update cuando methodologyMigrationPending (AGENTS sin .agents/)', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
 
     await plugin.hooks['session.created']({ projectRoot: tmpDir });
 
     const flagPath = path.join(tmpDir, '.refacil-pending-update');
-    assert.ok(fs.existsSync(flagPath), '.refacil-pending-update debe existir cuando hay tareas pendientes');
+    assert.ok(fs.existsSync(flagPath), '.refacil-pending-update debe existir cuando hay migración pendiente');
   });
 
   test('no escribe el flag cuando no hay migración pendiente', async () => {
-    // Create a change directory with all tasks done
-    const changesDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'test-change');
-    fs.mkdirSync(changesDir, { recursive: true });
-    fs.writeFileSync(path.join(changesDir, 'tasks.md'), '## Tasks\n- [x] Task 1\n- [x] Task 2\n');
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
+    fs.mkdirSync(path.join(tmpDir, '.agents'), { recursive: true });
 
     await plugin.hooks['session.created']({ projectRoot: tmpDir });
 
     const flagPath = path.join(tmpDir, '.refacil-pending-update');
-    assert.ok(!fs.existsSync(flagPath), '.refacil-pending-update NO debe existir cuando no hay tareas pendientes');
+    assert.ok(!fs.existsSync(flagPath), '.refacil-pending-update NO debe existir cuando AGENTS + .agents/ cumplen el contrato');
   });
 
   test('limpia flag obsoleto cuando ya no hay migración pendiente', async () => {
-    // Pre-existing flag but no more pending tasks
     fs.writeFileSync(path.join(tmpDir, '.refacil-pending-update'), JSON.stringify({ from: '4.0.0', to: '4.5.0' }));
 
-    const changesDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'done-change');
-    fs.mkdirSync(changesDir, { recursive: true });
-    fs.writeFileSync(path.join(changesDir, 'tasks.md'), '## Tasks\n- [x] Task done\n');
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
+    fs.mkdirSync(path.join(tmpDir, '.agents'), { recursive: true });
 
     await plugin.hooks['session.created']({ projectRoot: tmpDir });
 
@@ -82,7 +80,6 @@ describe('session.created — check-update', () => {
   });
 
   test('es tolerante cuando no existe refacil-sdd/changes/', async () => {
-    // No changes dir — should not throw
     await assert.doesNotReject(
       plugin.hooks['session.created']({ projectRoot: tmpDir }),
     );
@@ -93,10 +90,7 @@ describe('session.created — check-update', () => {
 
 describe('tui.prompt.append — notify-update', () => {
   test('retorna mensaje cuando existe el flag .refacil-pending-update', async () => {
-    // Create a pending task so methodologyMigrationPending returns true
-    const changesDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'pending-change');
-    fs.mkdirSync(changesDir, { recursive: true });
-    fs.writeFileSync(path.join(changesDir, 'tasks.md'), '## Tasks\n- [ ] Task 1\n');
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
 
     fs.writeFileSync(path.join(tmpDir, '.refacil-pending-update'), JSON.stringify({ from: '4.0.0', to: '4.5.0' }));
 

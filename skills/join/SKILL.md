@@ -49,7 +49,7 @@ Ask me about: <short list of areas where this repo is the source of truth>
 
 **Rules for generating it**:
 - **Extract and summarize from the existing `AGENTS.md`** if it has useful information — do not invent.
-- If there is no `AGENTS.md` or it is empty, read `package.json` and briefly explore the repo (e.g. `Read` of `README.md`, inspection of main folders).
+- If there is no `AGENTS.md` or it is empty, infer stack from **root manifests** (`README.md`, **`package.json`**, **`Cargo.toml`**, **`go.mod`**, **`pyproject.toml`**, **`pom.xml`**, **`Gemfile`**, etc.) plus top-level folders — **do not assume Node** if another manifest is authoritative.
 - Be concise: maximum 3-5 lines in total.
 - "Ask me about" must be a short comma-separated list (not markdown bullets) — e.g. "MCP tool contracts, PSE payment flows, webhooks, Redis session structure".
 - Do NOT use "Do not ask" or negative lists.

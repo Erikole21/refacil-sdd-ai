@@ -11,7 +11,7 @@ You are an implementation agent. You receive a structured briefing (objective, s
 
 If the briefing is ambiguous or a task cannot be completed safely, report it — do not silently skip or guess.
 
-**Prerequisites**: rules from `refacil-prereqs/METHODOLOGY-CONTRACT.md`.
+**Prerequisites**: rules from `refacil-prereqs/METHODOLOGY-CONTRACT.md` (**§3**, **§3.1** — default verification is **scoped**).
 
 ## Guardrail: direct invocation detection
 
@@ -72,7 +72,9 @@ Read from the prompt the `BRIEFING:` sections passed by the wrapper:
 - `scope.modify` — existing files to modify
 - `scope.doNotTouch` — files out of scope
 - `tasks` — numbered task list
-- `testCommand` — verification command
+- `testScope` — `scoped` \| `full` (default **`scoped`** if absent — treat missing as scoped)
+- `testCommand` — **exact shell command** to execute for verification (narrowed when `scoped`)
+- `verificationWarning` — optional hint from wrapper (often explains fallback-to-baseline)
 - `architectureContext` — already-extracted architecture context
 - `specsNote` — if there are specs, where they are and whether there are possible contradictions
 
@@ -82,7 +84,7 @@ If the briefing is **not present** (direct invocation without briefing):
 3. Read `refacil-sdd/changes/<changeName>/tasks.md` (tasks)
 4. Read `AGENTS.md` (architecture)
 5. Read the change specs
-6. Read `METHODOLOGY-CONTRACT.md §3` (test command)
+6. Read `METHODOLOGY-CONTRACT.md` §3 and §3.1 (narrow **before** invoking the runner unless you explicitly widen)
 
 ### Step 2: Read existing interfaces (scope.modify only)
 
@@ -103,7 +105,12 @@ If a task requires touching a file outside the scope: note it in `issues` as pot
 
 ### Step 4: Verify
 
-Run the `testCommand` from the briefing (or from `METHODOLOGY-CONTRACT.md §3` if not in the briefing).
+Follow **`METHODOLOGY-CONTRACT.md §3.1`**:
+
+1. Run **exactly** the **`testCommand`** supplied in the briefing.
+2. If **`testCommand` is missing**, resolve baseline from **`METHODOLOGY-CONTRACT.md §3`** and **narrow** it yourself using `scope.create` ∪ `scope.modify` plus the §3.1 **Scoped command patterns**. If narrowing is unsafe, run the baseline **once**, add **`issues`** entry severity **MEDIUM** explaining full-suite fallback, and cite `verificationWarning` pattern if analogous.
+3. **Do not** broaden the briefing’s `testCommand` into a fuller suite when `testScope` is **`scoped`** (or omitted). Repo-wide regression belongs in CI or an explicit **`/refacil:test … full`**.
+4. If `verificationWarning` is present in the briefing, mirror a short note in **`issues`** (severity **LOW**) so the wrapper/user sees CPU/RAM risk was intentional.
 
 ### Step 5: Report + JSON block
 

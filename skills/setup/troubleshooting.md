@@ -14,7 +14,7 @@ Consult this file **only** if a setup step fails. It is not part of the happy pa
 
 ## `refacil-sdd-ai init` creates files inside the wrong directory
 
-- Always run `refacil-sdd-ai init` from the **repo root** (where `package.json` lives), not from inside a subdirectory.
+- Always run `refacil-sdd-ai init` from the **repository root** (the folder that owns the codebase — commonly where `package.json`, `go.mod`, `pyproject.toml`, or `Cargo.toml` lives), not from inside a subdirectory.
 - If you accidentally ran it from a subdirectory, delete the mistakenly created `.claude/`, `.cursor/`, `.claudeignore`, `.cursorignore`, `.cursorrules`, and `CLAUDE.md` from that subdirectory, then re-run from the correct location.
 
 ## AGENTS.md is missing after init
