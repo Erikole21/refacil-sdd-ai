@@ -42,6 +42,7 @@ If you prefer only the report (without the marker), respond with the explicit sc
 - **If the briefing includes `projectType`**: use it to decide which checklists to load — **do not re-detect the project type**.
 - **If the briefing includes `changeObjective`**: use it as intent context — **do not read `proposal.md`** to extract the same thing.
 - Read ONLY the files in the blocking scope (those in `changedFiles`). Read pre-existing context only if strictly necessary to evaluate a checklist item.
+- **Do not run the project's full or scoped test suite via Bash** unless the briefing sets `testExecution: full` (rare) or the user explicitly requested re-execution. For checklist §6, use `commandsRun` / `criteriaRun` from the briefing and static review of test files (**METHODOLOGY-CONTRACT.md §3.2**).
 - **Every tool call has a cost** — justify each Read/Bash with a concrete evaluation need.
 
 ## Critical sub-agent rules
@@ -71,6 +72,8 @@ The main agent passes you the already-resolved scope and the BRIEFING block. Ext
 - `changedFiles` → blocking scope (new/modified files in this change)
 - `projectType` → which checklists to load
 - `changeObjective` → intent context of the change
+- `commandsRun`, `criteriaRun`, `lastStep` → test phase evidence (do not re-run suite when present)
+- `testExecution` → default `none` for review; never widen to full suite without explicit user request
 
 If the scope is ambiguous or empty, **stop** and respond only with:
 ```
@@ -108,6 +111,13 @@ For each FAIL, note whether the affected code belongs to the **blocking scope** 
 - **HIGH**: May break functionality, tests, or deployment.
 - **MEDIUM**: Relevant technical debt.
 - **LOW**: Non-blocking recommended improvement.
+
+**Coherence vs. Correctness distinction** — **See `METHODOLOGY-CONTRACT.md §3C — 3C Criterion: Completeness, Correctness, Coherence`** for the authoritative definitions. Quick reference:
+- A **coherence issue** is a deviation from established architectural patterns, naming conventions, or module boundaries — the code may work but does not fit the codebase structure (maps to WARNING or SUGGESTION in §3C).
+- A **correctness issue** is a failure to satisfy a spec criterion (CA-XX) or to handle a rejection condition (CR-XX) — the code does not do what it is supposed to do (maps to CRITICAL or WARNING in §3C).
+When classifying a FAIL, choose the type that most accurately reflects the root cause. A single finding may have both dimensions; report the dominant one and note the secondary.
+
+If `codegraphAvailable: true` in the briefing: use `codegraph_impact` or `codegraph_callers` on `changedFiles` before giving verdict on coherence and blast-radius — this helps identify unintended breakage across module boundaries. Absence of CodeGraph does not block or produce a WARNING; the checklist verdict is unaffected.
 
 ### Step 4: Emit report + JSON block
 
@@ -177,6 +187,42 @@ Next step: [/refacil:archive | /refacil:verify]
 ### Step 5: Detailed mode (optional)
 
 If the main agent indicates `mode: detailed`, after the concise report and BEFORE the JSON block, add a section per checklist with each item and its state `[PASS/FAIL/N/A]`.
+
+## CodeGraph integration (optional)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper.
 
 ## Rules
 

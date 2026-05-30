@@ -28,6 +28,8 @@ If the command fails or exits non-zero, use the default list: master, main.
   ```
 - If the branch is a working branch (`feature/*`, `fix/*`, `hotfix/*`, `refactor/*`, etc.), continue.
 
+**Autopilot mode detection**: try to read `refacil-sdd/.autopilot-active`. If the file exists → `autopilotMode = true`, extract `baseBranch` and `createPR` from the file. Otherwise `autopilotMode = false` (normal mode, ask user as usual).
+
 ### Step 2: Verify review (mandatory)
 
 Before continuing, verify if there are active changes in `refacil-sdd/changes/` (exclude the `archive/` folder).
@@ -60,12 +62,14 @@ Run `git status` to verify if there are changes to push.
 ### Step 4: Commit changes
 
 1. Run `git status --short` and show the user the list of detected files.
-2. Ask for explicit confirmation before staging everything.
-3. If the user confirms global staging, use `git add -A`.
-4. If the user requests partial staging, add only the indicated paths.
-5. If the user provided a message as argument (`$ARGUMENTS`), use it as the commit message.
-6. If no message was provided, generate a descriptive one based on the detected changes with `git diff --staged --stat`.
-7. Run `git commit -m "[message]"`.
+2. **Stage**:
+   - `autopilotMode = false` (normal): ask the user for confirmation before staging:
+     - If confirmed → `git add -A`.
+     - If partial staging requested → add only the indicated paths.
+   - `autopilotMode = true`: run `git add -A` immediately — do NOT ask.
+3. If the user provided a message as argument (`$ARGUMENTS`), use it as the commit message.
+4. If no message was provided, generate a descriptive one based on the detected changes with `git diff --staged --stat`.
+5. Run `git commit -m "[message]"`.
 
 ### Step 5: Push to remote
 
@@ -81,13 +85,16 @@ Run `git push -u origin [current-branch]` to push the changes.
  Remote: origin/[branch-name]
 ```
 
-2. **Ask the user** which branch they want to create the PR to. Show the list of protected branches obtained from `sdd config --json` in Step 1 so the user can pick one:
-   ```
-   Which branch do you want to create the PR to?
-   Protected branches available: [list from sdd config --json]
-   ```
-
-  Verify the chosen branch exists on the remote by inspecting `git branch -r` output before generating the link. If it does not exist, inform the user and ask them to confirm or correct the name. If the user indicates a branch not in the protected branches list, warn them before proceeding.
+2. **Select target branch**:
+   - `autopilotMode = false` (normal): ask the user which branch to PR to, showing the protected branches list:
+     ```
+     Which branch do you want to create the PR to?
+     Protected branches available: [list from sdd config --json]
+     ```
+     Verify the chosen branch exists on the remote (`git branch -r`). If not, inform the user and ask to confirm or correct. Warn if not in the protected branches list.
+   - `autopilotMode = true`: use `baseBranch` from `refacil-sdd/.autopilot-active` as the target branch, and respect the `createPR` flag:
+     - `createPR = true` → generate the PR link against `baseBranch`.
+     - `createPR = false` → skip PR creation entirely. Do NOT generate a link.
 
 3. Get the remote repository URL with `git remote get-url origin` and detect the VCS hosting used by this repository to generate the correct PR/MR link:
    - **GitHub** (url contains `github.com`): `https://github.com/[owner]/[repo]/compare/[target-branch]...[current-branch]?expand=1`

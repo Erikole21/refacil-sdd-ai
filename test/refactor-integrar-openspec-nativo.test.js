@@ -218,6 +218,74 @@ test('CA-09: archive/SKILL.md no usa openspec-archive-change', () => {
   );
 });
 
+test('CA-09b: archive/SKILL.md always delegates folder movement to the native archive CLI', () => {
+  const content = fs.readFileSync(ARCHIVE_SKILL, 'utf8');
+  assert.ok(
+    content.includes('refacil-sdd-ai sdd archive <changeName>') ||
+      content.includes('refacil-sdd-ai sdd archive [fix-name]') ||
+      content.includes('refacil-sdd-ai sdd archive <changeName>'),
+    'archive/SKILL.md must document native CLI archive as the folder movement path',
+  );
+  assert.ok(
+    !content.includes('bug fixes manually'),
+    'archive/SKILL.md must not describe bug fixes as manually archived',
+  );
+});
+
+test('CA-09c: archive/SKILL.md does not instruct manual moves for refacil-sdd changes', () => {
+  const content = fs.readFileSync(ARCHIVE_SKILL, 'utf8');
+  const forbiddenManualMovePatterns = [
+    /\bmv\b[\s\S]{0,120}refacil-sdd\/changes/i,
+    /\bgit\s+mv\b[\s\S]{0,120}refacil-sdd\/changes/i,
+    /\bcp\s+-r\b[\s\S]{0,120}refacil-sdd\/changes/i,
+    /move\s+the\s+folder\s+manually/i,
+    /manual\s+folder\s+move/i,
+  ];
+
+  for (const pattern of forbiddenManualMovePatterns) {
+    assert.ok(
+      !pattern.test(content),
+      `archive/SKILL.md must not contain manual move guidance matching ${pattern}`,
+    );
+  }
+});
+
+test('CA-09d: archive/SKILL.md keeps historical spec and review.yaml documentation steps', () => {
+  const content = fs.readFileSync(ARCHIVE_SKILL, 'utf8');
+  assert.ok(
+    content.includes('refacil-sdd/specs') && content.includes('spec.md'),
+    'archive/SKILL.md must keep historical spec documentation steps',
+  );
+  assert.ok(
+    content.includes('review.yaml') && content.includes('taskReferences'),
+    'archive/SKILL.md must keep review.yaml metadata persistence',
+  );
+});
+
+test('CA-09e: archive/SKILL.md classifies fix-* with full SDD artifacts as regular change', () => {
+  const content = fs.readFileSync(ARCHIVE_SKILL, 'utf8');
+  const determineTypeSection = content.slice(
+    content.indexOf('### Step 2: Determine change type'),
+    content.indexOf('### Step 2A: Bug fix'),
+  );
+
+  assert.ok(
+    determineTypeSection.includes('proposal.md') &&
+      determineTypeSection.includes('specs.md') &&
+      determineTypeSection.includes('design.md') &&
+      determineTypeSection.includes('tasks.md'),
+    'archive/SKILL.md must classify by full SDD artifact structure',
+  );
+  assert.ok(
+    determineTypeSection.includes('regular change') && determineTypeSection.includes('folder name starts with `fix-`'),
+    'fix-* changes with full SDD artifacts must use regular change flow',
+  );
+  assert.ok(
+    determineTypeSection.includes('summary.md') && determineTypeSection.includes('full SDD artifact set is absent'),
+    'minimal bug-fix flow must require summary.md and absence of full SDD artifacts',
+  );
+});
+
 // ── CA-10: Review Paso 3 ejecuta `refacil-sdd-ai sdd mark-reviewed` ──
 
 test('CA-10: review/SKILL.md usa refacil-sdd-ai sdd mark-reviewed', () => {

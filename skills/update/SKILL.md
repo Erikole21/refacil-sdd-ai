@@ -10,9 +10,39 @@ Detects the current repo state and applies only what is pending. Does not repeat
 
 The `notify-update` hook uses the **same engine** as this command; do not manually re-evaluate the repo to decide if there is work to do.
 
+## Step 0.5: CodeGraph setup (if needed)
+
+Run `refacil-sdd-ai codegraph status --json` and parse the output.
+
+**If `mode` is `disabled` or `null`**: skip this step entirely.
+
+**If `mode` is `enabled` or `per-repo`**:
+
+1. **CLI not installed** (`installed: false`): inform the user and ask for confirmation **before running anything**:
+
+   ```
+   CodeGraph is enabled but the CLI (@colbymchenry/codegraph) is not installed.
+   Installing it will run: npm install -g @colbymchenry/codegraph (~20 s)
+   Proceed? (yes / no)
+   ```
+
+   - **If yes**: run `refacil-sdd-ai codegraph setup` and **show its full output** to the user. This command installs the package, then builds the index **synchronously** — it blocks until `.codegraph/` is fully ready. Wait for it to complete before continuing. After it finishes, inform:
+     ```
+     CodeGraph: installed and index complete. .codegraph/ is ready.
+     Future /refacil:explore, /refacil:propose, and /refacil:bug sessions will use it automatically.
+     ```
+   - **If no**: skip CodeGraph for this session. Inform: "You can install it later with `npm install -g @colbymchenry/codegraph`, then run `/refacil:update` again."
+
+2. **CLI installed but repo not indexed** (`installed: true`, `initialized: false`): run `refacil-sdd-ai codegraph setup` and **show its full output**. This command blocks until the index is fully built — wait for it to finish before continuing. Inform:
+   ```
+   CodeGraph: index complete. .codegraph/ is ready.
+   ```
+
+3. **CLI installed and repo indexed** (`installed: true`, `initialized: true`): skip — nothing to do.
+
 ## Step 1: Validate with the CLI (mandatory)
 
-In the **repo root** (where `AGENTS.md` or `.claude/` is), run with `Bash`:
+In the **repo root** (where `AGENTS.md` is), run with `Bash`:
 
 ```bash
 refacil-sdd-ai migration-pending
@@ -34,6 +64,7 @@ The implementation lives in `lib/methodology-migration-pending.js` of the packag
 | 1 | `AGENTS.md` exists and `.agents/` folder does not | Restructure into `.agents/` + rewrite as index |
 | 2 | `CLAUDE.md` has more than 5 lines or does not point to `AGENTS.md` | Replace with minimal index |
 | 3 | `.cursorrules` has more than 5 lines or does not point to `AGENTS.md` | Replace with minimal index |
+| 4 | CodeGraph CLI not installed and mode is `enabled`/`per-repo` | Step 0.5: `refacil-sdd-ai codegraph setup` |
 
 ## Step 2: Confirm with the user
 

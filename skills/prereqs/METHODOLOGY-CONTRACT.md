@@ -5,10 +5,10 @@ This file centralizes cross-cutting rules to avoid duplication and inconsistenci
 ## §1 — Flow states (Definition of Ready / Done)
 
 - **READY_FOR_PROPOSE**: problem understood (objective, scope, constraints) and minimum repo context.
-- **READY_FOR_APPLY**: complete SDD artifacts (`proposal.md`, `design.md`, `tasks.md`, specification in `specs.md` and/or `specs/**/*.md`) and explicit user approval.
-- **READY_FOR_VERIFY**: implementation finished, no changes outside scope.
-- **READY_FOR_REVIEW**: for regular changes (propose), verify executed and critical issues resolved or accepted by the user. For bug fixes, the implementation and regression tests are complete (bugs do not go through verify).
-- **READY_FOR_ARCHIVE**: review approved (`.review-passed` exists), tasks complete or exceptions approved, change functionally closed.
+- **READY_FOR_APPLY**: complete SDD artifacts (`proposal.md`, `design.md`, `tasks.md`, specification in `specs.md` and/or recursive `specs/**/*.md`) and explicit user approval. Empty `specs/` folders do not count as specs.
+- **READY_FOR_VERIFY**: implementation finished, no changes outside scope; **`/refacil:test`** should have run (or user accepts running verify without test memory — see §3.2 CR-01).
+- **READY_FOR_REVIEW**: for regular changes (propose), verify executed (CA/CR validation; tests delegated to test phase by default per §3.2) and critical issues resolved or accepted by the user. For bug fixes, the implementation and regression tests are complete (bugs do not go through verify).
+- **READY_FOR_ARCHIVE**: review approved (`.review-passed` exists), tasks complete or approved `fix-*` exception, current `/refacil:test` evidence available unless explicitly accepted in normal mode, change functionally closed.
 - **READY_FOR_MERGE**: review approved (`.review-passed` exists) and integration ready: PR created for the target branch. `/refacil:up-code` automatically verifies the review before push — if missing, it runs it.
 - If multiple active changes exist without review, the target change must be explicitly selected before running review/push.
 
@@ -17,26 +17,30 @@ This file centralizes cross-cutting rules to avoid duplication and inconsistenci
 - If a skill requires the `sdd` profile: `AGENTS.md` is mandatory (if missing, stop and redirect to `/refacil:setup`).
 - If a skill requires the `agents` profile: if `AGENTS.md` is missing, continue with a generic baseline and report the limitation to the user.
 
-## §3 — Test command resolution (multi-stack)
+## §3 — Test command resolution (multi-stack, component-bounded)
 
-Do not hardcode `npm test` unless it is genuinely the project's command.
+**Component principle (language-agnostic)**: a *component* is the nearest independent unit with its own test setup — the closest ancestor directory (walking up from each changed file, bounded by the repo root) that contains a stack manifest (`package.json`, `go.mod`, `pyproject.toml`/`setup.py`/`pytest.ini`, `Cargo.toml`, `pom.xml`/`build.gradle`(.kts), `global.json`/`Directory.Build.props`, etc.). The `refacil-sdd-ai sdd test-scope` tool (`affectedComponents()`) exposes this automatically.
 
-Detection order:
-1. If `AGENTS.md` defines the official test command, use that.
-2. If a package manager script exists (e.g. `npm test`, `pnpm test`, `yarn test`, `bun test`), use the corresponding one.
+**All test execution is component-bounded**: no phase ever runs tests across the entire monorepo. `testScope: scoped` runs the narrowed tests of the affected component(s); `testScope: full` runs the full suite of each affected component (never all packages). The component root is the working directory for test commands in that component.
+
+Do not hardcode any specific runner (e.g. `npm test`) unless it is genuinely the project's command. Resolve the command language-agnostically:
+
+Detection order (applied at the **component root**, not the monorepo root):
+1. If `AGENTS.md` defines the official test command for this component, use that.
+2. If a package manager script exists at the component root (e.g. `npm test`, `pnpm test`, `yarn test`, `bun test`, `poetry run pytest`, etc.), use the corresponding one.
 3. If Python: `pytest`.
 4. If Go: `go test ./...`.
 5. If Rust: `cargo test`.
 6. If Java/Gradle: `./gradlew test` or `gradle test`.
 7. If Java/Maven: `mvn test`.
 
-Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `pytest --cov`, etc.). If it does not exist, report N/A with justification.
+Coverage (if applicable): detect the project command at the component root (`test:cov`, `coverage`, `pytest --cov`, etc.). If it does not exist, report N/A with justification.
 
-### §3.1 — Scoped test execution (default for `/refacil:test`, `/refacil:verify`, `/refacil:apply`, and debugger fix mode)
+### §3.1 — Scoped test execution (default for `/refacil:test`, `/refacil:apply`, and debugger fix mode; optional in `/refacil:verify` per §3.2)
 
 **Goal**: avoid high RAM/CPU from **full-repo** suites and **repo-wide** coverage on every SDD step. Defaults exercise **tests + coverage only for what the change touches**; full regression stays **on-demand** (explicit skill arguments or unavoidable fallback).
 
-**Also applies**: `/refacil:apply` (implementer verification step) and `/refacil:bug` (debugger `mode=fix`) — wrappers pass `testScope` and a **`testCommand` already narrowed** when `scoped`, same rules as rows in the table below.
+**Also applies**: `/refacil:apply` (implementer verification step) and `/refacil:bug` (debugger `mode=fix`) — wrappers pass `testScope` plus the raw §3 baseline command. The write-capable sub-agent derives the scoped smoke after editing from the files it actually touched; the wrapper must not precompute a stale narrowed command.
 
 | Briefing field | Values | Default |
 |----------------|--------|---------|
@@ -46,12 +50,13 @@ Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `p
 **Rules**
 
 1. **`testScope: scoped`** (default): sub-agents run tests **only** for artifacts tied to the current change — never invoke the §3 baseline in **full-repo / full-suite** form without narrowing (paths, packages, filters, patterns), except the explicit fallbacks below.
-2. **`testScope: full`**: **on-demand only** — user explicitly requests whole-suite regression in **`/refacil:test`** (or `/refacil:verify`) arguments (e.g. `full`, `all tests`, `whole suite`, `suite completa`). Then use the §3 baseline test command **without** path narrowing and, if coverage runs, use the project’s **normal** coverage entrypoint without narrowing collection to the diff (unless `AGENTS.md` defines otherwise).
+2. **`testScope: full`**: **on-demand only** — user explicitly requests whole-suite regression in **`/refacil:test`** (or `/refacil:verify`) arguments (e.g. `full`, `all tests`, `whole suite`, `suite completa`). Resolve the §3 baseline command language-agnostically at each **affected component root** and run it from that component dir (`cd <component> && <baseline>`). Never run all monorepo packages — only the component(s) whose files changed. If multiple components are affected, run each in sequence. Coverage = component-wide (not repo-wide).
 3. **`runCoverage: true`** (default): after scoped tests pass, run coverage **narrowed to the change** — instrument/collect only for **`filesToTest`**, **`changedFiles`**, and companion test/spec paths tied to those modules (examples: `--cov=pkg/sub`, Jest `--collectCoverageFrom` globs limited to touched trees, Gradle/JaCoCo scoped modules). If the toolchain cannot narrow, report **N/A** plus a WARNING; do **not** silently widen to repo-wide coverage while `testScope` remains `scoped`.
 4. **`runCoverage: false`**: skip coverage entirely — only when the user **explicitly** opts out (`no coverage`, `nocoverage`, `skip coverage`, `sin cobertura`, etc.) or the project defines **no** coverage command under §3.
 5. **`runCoverage: true` + `testScope: full`**: run the project coverage command **after** the full suite passes, using the repo’s usual global/module coverage behavior (heavy — intended only when the user requested `full`).
-6. **`/refacil:apply` / implementer**: the apply wrapper supplies `testScope` (default `scoped`) and **`testCommand`**. Implementer runs **only** `testCommand` for Step verification — no repo-wide substitution. Coverage is optional in that step unless the briefing adds an explicit coverage command (unusual; defer to `/refacil:test`).
+6. **`/refacil:apply` / implementer**: the apply wrapper supplies `testScope` (default `scoped`) and **`testBaselineCommand`**. After editing, the implementer runs `refacil-sdd-ai sdd test-scope --files <touched-files-csv> --baseline "<testBaselineCommand>"` and executes the returned smoke command. The implementer **NEVER runs the full repo/package baseline** as the apply verification step — the "unreliable scope → run baseline once" escape hatch in §3.1 Scoped command patterns does NOT apply here. Fallback behaviour: if `test-scope` returns `fallback: true`, fails, or there are no touched files, run only the touched files that are themselves test files; if none exist, **SKIP verification** and add a LOW `issues` entry deferring to `/refacil:test`. Also applies: the wrapper must not precompute a stale narrowed command. Coverage is optional in that step unless the briefing adds an explicit coverage command (unusual; defer to `/refacil:test`).
 7. **`/refacil:bug` / debugger `mode=fix`**: debugger defaults to **`scoped`**, narrows §3 baseline to **`filesModified` ∪ new/updated regression test files** unless the wrapper passed **`testScope: full`**.
+8. **Re-run / fix-loop (pass-2)**: when iterating on failing tests, run **only the previously-failing test files** — not the entire component suite. This keeps fix loops fast and bounded.
 
 **Scoped command patterns** (language-agnostic — sub-agent reads `AGENTS.md`, build config, and tool docs; run from the correct module/root):
 
@@ -60,7 +65,78 @@ Coverage (if applicable): detect the project command (`test:cov`, `coverage`, `p
 - **Scoped coverage**: combine the same narrowing with coverage flags/includes that limit **report collection** to touched sources (runner-specific); exclude unrelated packages by default when `testScope: scoped`.
 - **Unreliable scope**: if narrowing cannot be done safely, run the baseline §3 command **once**, report a brief WARNING that the run may be heavy, and suggest CI or **`/refacil:test ... full`** for full regression.
 
-**Verify**: Prefer `commandsRun` from `get-memory` (same invocation as `/refacil:test` when present). Else derive scoped targets from `changedFiles` and/or `git diff --name-only`, using **project test naming and layout** (`AGENTS.md`, test config): e.g. co-located `*Spec.*` / `*Test.*`, `tests/`, language-specific suffices — not a fixed extension.
+**Verify (when `testExecution: full`)**: Prefer `commandsRun` from `get-memory` as reference only when re-running; else derive scoped targets from `changedFiles` and/or `git diff --name-only`, using **project test naming and layout** (`AGENTS.md`, test config): e.g. co-located `*Spec.*` / `*Test.*`, `tests/`, language-specific suffices — not a fixed extension.
+
+### §3.2 — Phase ownership (test execution)
+
+**Goal**: run the **full** scoped (or full-suite) test + coverage pipeline **once per cycle** in `/refacil:test`. Later phases validate specs and quality **without** repeating that pipeline unless the user explicitly requests it or test memory is missing.
+
+| Phase | Runs tests? | Coverage? | Writes `memory.commandsRun`? |
+|-------|-------------|-----------|--------------------------------|
+| `/refacil:apply` | Scoped post-implementation check only (pre-test) | Unusual; defer to test | No |
+| `/refacil:test` | **Yes** — canonical suite for the change | **Yes** (scoped by default) | **Yes** |
+| `/refacil:verify` | **No by default** (`testExecution: none`) | No | No (reads memory) |
+| `/refacil:review` | **No** (checklist + file reads) | No | No |
+| Corrections after verify/review | **Smoke only** or defer to `/refacil:test` | No | No |
+
+**Briefing field `testExecution`** (verify wrapper → validator):
+
+| Value | When | Validator behavior |
+|-------|------|-------------------|
+| `none` | Default if `memory.lastStep` is `test` (or later) and `commandsRun` is non-empty; user did not force re-run | **Do not** run `testCommand` or `coverageCommand`. Tests section = **delegated to test phase**; cite last `commandsRun`. |
+| `smoke` | After surgical corrections in verify Step 5 (or rare review fix) | Run **only** companion test files for `correctionTouchedFiles`. **No** `coverageCommand`. |
+| `full` | User tokens (`full`, `re-run tests`, `run tests`, …) **or** CR-01 (no test memory) | Same as §3.1: `testCommand` + optional narrowed/full coverage per `testScope` / `runCoverage`. |
+
+**Smoke definition**: the smallest test invocation that exercises files touched by a **correction** (not the whole change). Derive companion paths from project layout (`*Spec*`, `*Test*`, `tests/`, etc.). Smoke **does not** satisfy coverage gates or replace `/refacil:test`.
+
+**After corrections** (verify Step 5 or review Step 3.5): prefer `testExecution: none` + tell the user to run **`/refacil:test`** before the next full verify; or `smoke` once on correction files. **Never** use `full` in autofix re-verify unless the user explicitly requested it in the same invocation.
+
+**Review checklist “tests pass”**: PASS when test files exist for the diff, `memory.criteriaRun` covers relevant CA/CR, and static review finds no obvious breakage — **without** running the §3 baseline via Bash unless the user explicitly asked.
+
+## §3C — 3C Criterion: Completeness, Correctness, Coherence
+
+The **3C criterion** is the authoritative framework for evaluating implementations. It is applied by the `refacil-validator` sub-agent during `/refacil:verify` and referenced by the `refacil-auditor` during `/refacil:review`. All three dimensions must be assessed; missing one dimension is itself a WARNING.
+
+### Dimension 1 — Completeness (is everything implemented?)
+
+**Question**: Does the implementation cover all tasks and all scope files listed in the briefing?
+
+Operational checks:
+- Every task in `tasks.md` (or the briefing's task list) has a corresponding code artifact.
+- Every file in `scope.create` exists and has substantive content coherent with the objective.
+- Every file in `scope.modify` was actually modified with changes relevant to the task.
+- No mandatory scope file is missing or is an empty scaffold.
+
+### Dimension 2 — Correctness (is it correctly implemented?)
+
+**Question**: Does each implemented artifact satisfy the CA/CR criteria from the specs?
+
+Operational checks:
+- For each CA-XX: verify the implementation satisfies the criterion by reading the relevant scope files.
+- For each CR-XX: verify that edge cases and rejection conditions are handled.
+- Behavior matches the spec intent — not just surface text.
+
+### Dimension 3 — Coherence (is it consistent with the architecture?)
+
+**Question**: Do the new or modified files fit the established patterns without introducing inconsistencies?
+
+Operational checks:
+- New files follow naming, structure, and module conventions from `architectureContext` (or `AGENTS.md`).
+- No files outside `scope.doNotTouch` were modified.
+- Patterns introduced are consistent with existing ones in the same module or layer.
+- If `codegraphAvailable: true` in the briefing: use `codegraph_context` or `codegraph_search` on `changedFiles` to verify architectural coherence. If not available, continue with direct file reading.
+
+### Severity table
+
+| Severity | Completeness | Correctness | Coherence |
+|----------|-------------|-------------|-----------|
+| CRITICAL | Mandatory task or `scope.create` file missing entirely | Mandatory CA not met; spec contract broken | Files in `scope.doNotTouch` modified |
+| WARNING | Partial implementation of a task; `scope.modify` file unchanged | Regression risk; CR edge case not handled | Pattern deviation; naming inconsistency |
+| SUGGESTION | Optional improvement not covered | Improvable edge case handling | Better alignment opportunity |
+
+### Graceful degradation rule
+
+If the briefing does not include `criteria` (CA/CR list), infer the criteria by reading `refacil-sdd/changes/<changeName>/specs.md` or `specs/**/*.md`. If there are no specs either, apply **only Dimension 1 (Completeness)** and document the limitation as a WARNING in the report. Never block verification entirely due to missing specs — degrade gracefully.
 
 ## §4 — Protected branch policy and branch creation
 
@@ -149,7 +225,7 @@ If the user does not request detail, use concise mode.
 - When there are **multiple valid next steps** (real branching), list numbered options and ask for explicit selection.
 - If the current step is **terminal** (end of flow, e.g. PR created), close without asking for the next skill.
 
-**Operative rule (mandatory)**: if the user confirms affirmatively ("yes", "ok", "go", "continue", "sure", etc.) to the continuity question, **directly invoke the next skill via the Skill tool** in the same turn. Do not ask the user to type `/refacil:X` or repeat the context — the session must continue without friction.
+**Operative rule (mandatory)**: if the user confirms affirmatively ("yes", "ok", "go", "continue", "sure", etc.) to the continuity question, **directly execute the next `/refacil:<skill>` command** in the same turn. Do not ask the user to type it or repeat the context — the session must continue without friction.
 
 ## §6 — Review and push scope
 
@@ -160,6 +236,9 @@ If the user does not request detail, use concise mode.
 ## §7 — Review evidence persistence
 
 - `archive` requires `.review-passed` as a blocking precondition (verify existence according to **§8**).
+- Regular changes require the proposal artifact set before apply/archive readiness: `proposal.md`, `design.md`, `tasks.md`, and specs from non-empty `specs.md` and/or recursive non-empty `specs/**/*.md`. The same source set must be used by `sdd status`, `sync-spec`, test/verify criteria extraction, and archive.
+- Operational bug fixes created by `/refacil:bug` are the exception: `fix-*` changes may archive without proposal artifacts when they include `summary.md`, regression test evidence, and `.review-passed`. Archive must document the resulting behavior under `refacil-sdd/specs/` with `review.yaml`.
+- Archive must use current `/refacil:test` evidence from `memory.yaml` instead of re-running tests by default. If evidence is missing or stale, normal mode asks the user to run `/refacil:test` or explicitly continue; autopilot mode aborts to preserve the contract without hidden broad test execution.
 - When archiving regular changes (proposal-driven flow), the `.review-passed` metadata must be persisted in `refacil-sdd/specs/`.
 - `archive` must request and persist at least one task reference for traceability. Accepted formats: URL, ticket/issue identifier, or short task name.
 - The recommended field in `review.yaml` is `taskReferences` (YAML list). Do not enforce provider-specific fields such as `jiraTasks`.
@@ -174,7 +253,7 @@ If the user does not request detail, use concise mode.
 
 ## §9 — Folder identifier under `refacil-sdd/changes/<change>/`
 
-- The **folder name** of the active change is the identifier used by the refacil-sdd CLI (`refacil-sdd status --change`, archive flows, etc.).
+- The **folder name** of the active change is the identifier used by the refacil-sdd CLI (`refacil-sdd-ai sdd status <change>`, archive flows, etc.).
 - **Must start with an ASCII letter** `[a-zA-Z]`. If the first character is a digit or other symbol, the CLI rejects the name (e.g. `Invalid change name: Change name must start with a letter`).
 
 ## §10 — Language policy

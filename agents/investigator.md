@@ -71,6 +71,42 @@ At the end of the report, suggest:
 - If the user might want to make a change: "Run `/refacil:propose <description>` to create a proposal"
 - If the user might want to investigate further: "Run `/refacil:explore <other question>` to continue exploring"
 
+## CodeGraph integration (optional)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper.
+
 ## Rules
 
 - Do NOT modify any file or generate code.

@@ -73,18 +73,21 @@ Read from the prompt the `BRIEFING:` sections passed by the wrapper:
 - `scope.doNotTouch` — files out of scope
 - `tasks` — numbered task list
 - `testScope` — `scoped` \| `full` (default **`scoped`** if absent — treat missing as scoped)
-- `testCommand` — **exact shell command** to execute for verification (narrowed when `scoped`)
+- `testBaselineCommand` — project baseline test command; the implementer derives the smoke dynamically (no precomputed smoke in the briefing)
+- `codegraphAvailable` — `true` \| `false` (passed by the wrapper; controls CodeGraph tool availability)
 - `verificationWarning` — optional hint from wrapper (often explains fallback-to-baseline)
 - `architectureContext` — already-extracted architecture context
 - `specsNote` — if there are specs, where they are and whether there are possible contradictions
 
 If the briefing is **not present** (direct invocation without briefing):
-1. Read `refacil-sdd/changes/<changeName>/proposal.md` (objective)
-2. Read `refacil-sdd/changes/<changeName>/design.md` (file scope)
-3. Read `refacil-sdd/changes/<changeName>/tasks.md` (tasks)
+0. Run `git rev-parse --show-toplevel` → store as `<projectRoot>`. Use this absolute path for all artifact reads below — never relative paths in a monorepo.
+1. Read `<projectRoot>/refacil-sdd/changes/<changeName>/proposal.md` (objective)
+2. Read `<projectRoot>/refacil-sdd/changes/<changeName>/design.md` (file scope)
+3. Read `<projectRoot>/refacil-sdd/changes/<changeName>/tasks.md` (tasks)
 4. Read `AGENTS.md` (architecture)
 5. Read the change specs
-6. Read `METHODOLOGY-CONTRACT.md` §3 and §3.1 (narrow **before** invoking the runner unless you explicitly widen)
+6. Read `METHODOLOGY-CONTRACT.md` §3 and §3.1 (narrow **before** invoking the runner unless you explicitly widen).
+   **`testBaselineCommand`** is the project baseline from `METHODOLOGY-CONTRACT.md §3` — use it verbatim; do not pre-narrow it here. When the wrapper supplies the briefing, `testBaselineCommand` is already extracted and passed directly.
 
 ### Step 2: Read existing interfaces (scope.modify only)
 
@@ -103,14 +106,41 @@ With the context loaded, implement each task in order:
 
 If a task requires touching a file outside the scope: note it in `issues` as potential scope creep and decide with a conservative criterion.
 
-### Step 4: Verify
+### Step 4: Verify (dynamic smoke)
+
+This verification is **smoke-only** and does NOT replace `/refacil:test` (canonical suite + coverage + `memory.commandsRun`).
 
 Follow **`METHODOLOGY-CONTRACT.md §3.1`**:
 
-1. Run **exactly** the **`testCommand`** supplied in the briefing.
-2. If **`testCommand` is missing**, resolve baseline from **`METHODOLOGY-CONTRACT.md §3`** and **narrow** it yourself using `scope.create` ∪ `scope.modify` plus the §3.1 **Scoped command patterns**. If narrowing is unsafe, run the baseline **once**, add **`issues`** entry severity **MEDIUM** explaining full-suite fallback, and cite `verificationWarning` pattern if analogous.
-3. **Do not** broaden the briefing’s `testCommand` into a fuller suite when `testScope` is **`scoped`** (or omitted). Repo-wide regression belongs in CI or an explicit **`/refacil:test … full`**.
-4. If `verificationWarning` is present in the briefing, mirror a short note in **`issues`** (severity **LOW**) so the wrapper/user sees CPU/RAM risk was intentional.
+1. **Determine files this run actually touched** by running:
+   ```
+   git diff --name-only HEAD
+   ```
+   If that returns nothing (e.g. working-tree changes only), fall back to:
+   ```
+   git status --porcelain
+   ```
+   and extract the filenames from the output.
+
+2. **Derive a minimal scoped smoke command** (stack-agnostic — no hardcoded runners):
+   ```
+   refacil-sdd-ai sdd test-scope --files <touched-files-csv> --baseline "<testBaselineCommand>"
+   ```
+   Use the resulting `testCommand` from the output.
+
+3. **Run the resulting smoke command.**
+
+4. **Fallback rules** — `/refacil:apply` **NEVER runs the full baseline as verification**. The §3.1 "unreliable scope → run baseline once" escape hatch does **NOT** apply here; that rule is for `/refacil:test` only.
+   - If `test-scope` returns a scoped command → run it (unchanged).
+   - If `test-scope` returns `fallback: true`, or fails, or the git diff/status output was empty (no touched files): identify any touched files that are themselves test files (matching the project test naming: `*.test.js`, `*.spec.js`, `*.test.ts`, `*.spec.ts`, `test_*.py`, `*_test.go`, etc.). Run **only those files** directly.
+   - If there are no such self-test files either → **SKIP** verification entirely. Add an **`issues`** entry severity **LOW** with description "no scopeable tests for touched files — verification deferred to /refacil:test" and set Verification to SKIPPED (deferred). Do **NOT** run `testBaselineCommand` in this case.
+   - In all fallback cases, add an **`issues`** entry severity **LOW** with `fallbackReason` from `test-scope` (or "empty diff / no touched files").
+
+5. **Note**: the `testBaselineCommand` field in the briefing is the project baseline command resolved at the **affected component root** (language-agnostic, per §3 component principle — the wrapper already resolved it there). The `sdd test-scope` call in step 2 produces a command with the correct `cd <component>` prefix when the component is a subdirectory. The smoke computed here replaces any precomputed `smokeTestCommand` — the briefing must NOT pre-supply a smoke command.
+
+6. If `verificationWarning` is present in the briefing, mirror a short note in **`issues`** (severity **LOW**) so the wrapper/user sees it.
+
+7. **Do not** broaden beyond the smoke into a fuller suite when `testScope` is **`scoped`** (or omitted). Repo-wide regression belongs in CI or an explicit **`/refacil:test … full`**. This verification is **smoke-only** and does NOT replace `/refacil:test` (canonical suite + coverage + `memory.commandsRun`).
 
 ### Step 5: Report + JSON block
 
@@ -149,6 +179,42 @@ Your final response MUST have this structure:
 - Emit it ALWAYS, even if the result is PARTIAL or FAILED.
 - `filesRead` lists the files you read (for cost observability).
 - `issues` must be an empty array `[]` if there are no problems.
+
+## CodeGraph integration (optional)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper.
 
 ## Rules
 

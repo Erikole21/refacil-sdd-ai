@@ -113,6 +113,7 @@ describe('installHooks (.cursor) — hooks.json', () => {
 
     const h = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
     assert.ok(h.hooks.sessionStart.some((e) => e._sdd === true));
+    assert.ok(!h.hooks.workspaceOpen?.some((e) => e._sdd_workspace === true));
     assert.ok(h.hooks.preToolUse.some((e) => e._sdd_compact === true));
     assert.ok(h.hooks.preToolUse.some((e) => e._sdd_review === true));
     assert.ok(h.hooks.beforeSubmitPrompt.some((e) => e._sdd_notify === true));
@@ -139,7 +140,26 @@ describe('installHooks (.cursor) — hooks.json', () => {
 
     const h = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
     assert.equal(h.hooks.sessionStart.filter((e) => e._sdd).length, 1);
+    assert.ok(!h.hooks.workspaceOpen?.some((e) => e._sdd_workspace === true));
     assert.equal(h.hooks.beforeSubmitPrompt.filter((e) => e._sdd_notify).length, 1);
+  });
+
+  test('elimina workspaceOpen legacy _sdd_workspace al reinstalar', () => {
+    fs.mkdirSync(path.join(tmpDir, '.cursor'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.cursor', 'hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          sessionStart: [{ _sdd: true, command: 'refacil-sdd-ai check-update' }],
+          workspaceOpen: [{ _sdd_workspace: true, command: 'refacil-sdd-ai check-update' }],
+        },
+      }) + '\n',
+    );
+    installHooks('.cursor', tmpDir);
+    const h = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
+    assert.ok(h.hooks.sessionStart.some((e) => e._sdd === true));
+    assert.ok(!h.hooks.workspaceOpen?.some((e) => e._sdd_workspace === true));
   });
 
   test('retorna true en primera instalacion', () => {
@@ -154,6 +174,7 @@ describe('uninstallHooks (.cursor)', () => {
 
     const h = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
     assert.ok(!h.hooks?.sessionStart);
+    assert.ok(!h.hooks?.workspaceOpen);
     assert.ok(!h.hooks?.preToolUse);
     assert.ok(!h.hooks?.beforeSubmitPrompt);
   });
@@ -187,6 +208,7 @@ describe('CR-2: Claude Code usa settings.json, Cursor usa hooks.json', () => {
     // Cursor: hooks en hooks.json
     const ch = JSON.parse(fs.readFileSync(path.join(tmpDir, '.cursor', 'hooks.json'), 'utf8'));
     assert.ok(ch.hooks.sessionStart.some((h) => h._sdd));
+    assert.ok(!ch.hooks.workspaceOpen?.some((h) => h._sdd_workspace));
     assert.ok(ch.hooks.beforeSubmitPrompt.some((h) => h._sdd_notify));
   });
 });

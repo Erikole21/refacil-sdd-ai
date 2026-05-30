@@ -16,6 +16,7 @@ const {
   removeSkills,
   removeGlobalSkills,
   removeOpenCodeArtifacts,
+  removeOpenCodeGlobalArtifacts,
   removeCodexArtifacts,
   removeOpenspecLegacyAssets,
   removeProjectLevelArtifacts,
@@ -28,15 +29,22 @@ const {
   getPackageVersion,
   checkNodeVersion,
   checkClaudeCodeVersion,
+  promptCodegraphMode,
 } = require('../lib/installer');
 const { installHooks, uninstallHooks, cleanLegacySettingsHooks, installOpenCodePlugin, uninstallOpenCodePlugin, removeProjectLevelHooks } = require('../lib/hooks');
 const { globalClaudeDir, globalCursorDir, globalOpenCodeDir, globalCodexDir, readSelectedIDEs, writeSelectedIDEs } = require('../lib/global-paths');
 const { detectInstalledIDEs } = require('../lib/ide-detection');
 const { handleCompact } = require('../lib/commands/compact');
 const { handleBus } = require('../lib/commands/bus');
+const { handleReadSpec } = require('../lib/commands/read-spec');
 const { handleSdd, autoMigrateOpenspec, findProjectRoot, cmdWriteConfig } = require('../lib/commands/sdd');
+const { handleAutopilot } = require('../lib/commands/autopilot');
+const { resolveWorkspaceRoot } = require('../lib/project-root');
+const { evaluateGitPushReview } = require('../lib/check-review');
 const { syncIgnoreFiles } = require('../lib/ignore-files');
 const { methodologyMigrationPending } = require('../lib/methodology-migration-pending');
+const { resolveSelectedIDEsForRepo, syncRepoIdeFiles } = require('../lib/repo-ide-sync');
+const codegraph = require('../lib/codegraph');
 
 const packageRoot = path.resolve(__dirname, '..');
 const projectRoot = findProjectRoot();
@@ -101,8 +109,15 @@ function notifyUpdate() {
   if (!info.shown) {
     // First time: block so the user sees it clearly
     try { fs.writeFileSync(flagPath, JSON.stringify({ ...info, shown: true })); } catch (_) {}
+    const isSameVersion = info.from && info.to && info.from === info.to;
+    const header = isSameVersion
+      ? '[refacil-sdd-ai] Pending SDD-AI configuration detected.'
+      : `[refacil-sdd-ai] Methodology update detected (${fromLabel} → v${info.to}).`;
+    const reasonLines = mig.reasons.length
+      ? '\nPending:\n' + mig.reasons.map((r) => `  • ${r}`).join('\n')
+      : '';
     const userMsg =
-      `[refacil-sdd-ai] Methodology update detected (${fromLabel} → v${info.to}).\n` +
+      `${header}${reasonLines}\n` +
       `Your message was paused. Do you want to apply the pending migrations before continuing?\n` +
       `  • Yes: run /refacil:update\n` +
       `  • No: resend your previous message to continue without updating.`;
@@ -117,15 +132,16 @@ function notifyUpdate() {
     // Second time: let through and notify the LLM (only Claude Code supports context injection)
     try { fs.unlinkSync(flagPath); } catch (_) {}
     if (!isCursor) {
+      const reasonSummary = mig.reasons.length ? ` Pending: ${mig.reasons.join('; ')}` : '';
       console.log(
-        `[refacil-sdd-ai] IMPORTANT: there is a pending SDD-AI methodology update (${fromLabel} → v${info.to}). ` +
+        `[refacil-sdd-ai] IMPORTANT: there is a pending SDD-AI methodology update (${fromLabel} → v${info.to}).${reasonSummary} ` +
         `Before responding to the user, ask them if they want to run /refacil:update now.`,
       );
     }
   }
 }
 
-function repoIsInitialized() {
+function repoIsInitialized(repoRoot = projectRoot) {
   const home = os.homedir();
   // Check global dirs first (new installation model)
   if (
@@ -138,9 +154,9 @@ function repoIsInitialized() {
   }
   // Fallback: check legacy project-level dirs for backward compat
   return (
-    fs.existsSync(path.join(projectRoot, '.claude', 'skills')) ||
-    fs.existsSync(path.join(projectRoot, '.cursor', 'skills')) ||
-    fs.existsSync(path.join(projectRoot, '.opencode', 'skills'))
+    fs.existsSync(path.join(repoRoot, '.claude', 'skills')) ||
+    fs.existsSync(path.join(repoRoot, '.cursor', 'skills')) ||
+    fs.existsSync(path.join(repoRoot, '.opencode', 'skills'))
   );
 }
 
@@ -273,10 +289,10 @@ function semverGt(a, b) {
   return false;
 }
 
-function syncRepoSkillsIfStale(globalVersion) {
-  if (!repoIsInitialized()) return null;
+function syncRepoSkillsIfStale(globalVersion, repoRoot = projectRoot) {
+  if (!repoIsInitialized(repoRoot)) return null;
   // Repo-level version takes priority; fall back to global store
-  const repoVersion = readRepoVersion(projectRoot) || readGlobalVersion(os.homedir(), projectRoot);
+  const repoVersion = readRepoVersion(repoRoot) || readGlobalVersion(os.homedir(), repoRoot);
   if (repoVersion === globalVersion) return null;
 
   // Repo has newer skills than the installed package — do not downgrade
@@ -318,17 +334,126 @@ function migrationPendingCmd() {
   process.exit(pending ? 1 : 0);
 }
 
+/**
+ * Detect whether any active refacil flow is in progress (any .review-passed, proposal.md, etc.).
+ * Returns true if the user is mid-flow so we don't interrupt with the CodeGraph suggestion.
+ */
+function isActiveRefacilFlow() {
+  try {
+    const changesDir = path.join(projectRoot, 'refacil-sdd', 'changes');
+    if (!fs.existsSync(changesDir)) return false;
+    const entries = fs.readdirSync(changesDir, { withFileTypes: true });
+    return entries.some(
+      (e) => e.isDirectory() && e.name !== 'archive' &&
+        fs.existsSync(path.join(changesDir, e.name, 'proposal.md')),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Inject a CodeGraph suggestion block if conditions are met:
+ *   1. codegraphMode is null/undefined (no preference set yet)
+ *   2. No active refacil flow detected
+ *   3. Suggestion has not been permanently suppressed (codegraph-suggest-shown: true)
+ *   4. Snooze period has not expired
+ */
+function maybeInjectCodegraphSuggestion() {
+  try {
+    const { readConfigFile, extractCodegraphMode, extractCodegraphSuggestState, writeConfigValue } = require('../lib/config');
+    const globalConfigPath = path.join(os.homedir(), '.refacil-sdd-ai', 'config.yaml');
+    const globalCfg = readConfigFile(globalConfigPath) || {};
+
+    const codegraphMode = extractCodegraphMode(globalCfg, 'global');
+    if (codegraphMode !== null) return; // Already answered — do not suggest again
+
+    const { shown, snoozeUntil } = extractCodegraphSuggestState(globalCfg, 'global');
+    if (shown === true) return; // Permanently suppressed
+
+    if (snoozeUntil) {
+      try {
+        const snoozeDate = new Date(snoozeUntil);
+        if (!isNaN(snoozeDate.getTime()) && new Date() < snoozeDate) return; // Still snoozed
+      } catch (_) {}
+    }
+
+    if (isActiveRefacilFlow()) return; // Mid-flow — do not interrupt
+
+    const msg =
+      '[refacil-sdd-ai] CodeGraph is available — an optional tool that reduces token usage ~71% ' +
+      'in exploratory sub-agents (investigate, propose, debug) by querying the call graph instead of reading files.\n' +
+      'https://github.com/colbymchenry/codegraph (MIT, Colby McHenry)\n\n' +
+      'Would you like to enable CodeGraph integration?\n' +
+      '  1) yes-now     — enable and index this repo immediately\n' +
+      '  2) yes-later   — enable globally (index repos on /refacil:setup)\n' +
+      '  3) no-7d       — remind me in 7 days\n' +
+      '  4) never       — disable permanently\n\n' +
+      'Type a number (1-4) and press Enter, or press Enter to skip: ';
+
+    process.stdout.write(msg);
+
+    // Only read stdin when running in a real TTY — in hook context stdin is a pipe
+    // and fs.readFileSync(0) would block indefinitely waiting for data or EOF.
+    if (!process.stdin.isTTY) return;
+
+    let response = '';
+    try {
+      const raw = fs.readFileSync(0, { encoding: 'utf8', flag: 'r' });
+      response = raw.trim().toLowerCase();
+    } catch (_) {
+      return; // stdin not readable in this context — skip
+    }
+
+    if (response === '1' || response === 'yes-now') {
+      writeConfigValue('codegraphMode', 'enabled', os.homedir());
+      writeConfigValue('codegraph-suggest-shown', 'true', os.homedir());
+      const selectedIDEs = readSelectedIDEs() || ['.claude', '.cursor', '.opencode', '.codex'];
+      codegraph.registerMcp(selectedIDEs);
+      if (codegraph.isInstalled()) {
+        codegraph.init(projectRoot);
+        process.stdout.write('[refacil-sdd-ai] CodeGraph indexing started in background.\n');
+      } else {
+        process.stdout.write(
+          '[refacil-sdd-ai] CodeGraph mode set to enabled. ' +
+          'Install @colbymchenry/codegraph to activate: npm install -g @colbymchenry/codegraph\n',
+        );
+      }
+    } else if (response === '2' || response === 'yes-later') {
+      writeConfigValue('codegraphMode', 'enabled', os.homedir());
+      writeConfigValue('codegraph-suggest-shown', 'true', os.homedir());
+      process.stdout.write('[refacil-sdd-ai] CodeGraph mode set to enabled. Repos will be indexed on /refacil:setup.\n');
+    } else if (response === '3' || response === 'no-7d') {
+      const snoozeDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      writeConfigValue('codegraph-suggest-snooze', snoozeDate, os.homedir());
+      process.stdout.write('[refacil-sdd-ai] CodeGraph suggestion snoozed for 7 days.\n');
+    } else if (response === '4' || response === 'never') {
+      writeConfigValue('codegraphMode', 'disabled', os.homedir());
+      writeConfigValue('codegraph-suggest-shown', 'true', os.homedir());
+      process.stdout.write(
+        '[refacil-sdd-ai] CodeGraph disabled. Re-enable with: ' +
+        'refacil-sdd-ai sdd config --set codegraph enabled\n',
+      );
+    }
+    // Empty/unrecognised response — skip silently
+  } catch (_) {
+    // Suggestion injection must never break session startup
+  }
+}
+
 function checkUpdate() {
-  clearStalePendingUpdateFlag(projectRoot);
+  const root = resolveWorkspaceRoot();
+
+  clearStalePendingUpdateFlag(root);
 
   try {
-    autoMigrateOpenspec(projectRoot);
+    autoMigrateOpenspec(root);
   } catch (err) {
     process.stderr.write(`[refacil-sdd-ai] Could not migrate openspec/ to refacil-sdd/: ${err.message}\n`);
   }
 
   try {
-    const legacyRemoved = removeOpenspecLegacyAssets(projectRoot);
+    const legacyRemoved = removeOpenspecLegacyAssets(root);
     if (legacyRemoved > 0) {
       process.stderr.write(`[refacil-sdd-ai] Removed ${legacyRemoved} legacy OpenSpec assets (openspec-* skills, opsx-* commands)\n`);
     }
@@ -346,8 +471,8 @@ function checkUpdate() {
       fs.existsSync(path.join(globalCodexDir(home), 'skills'));
 
     if (globalActive) {
-      const cleaned = removeProjectLevelArtifacts(projectRoot);
-      removeProjectLevelHooks(projectRoot);
+      const cleaned = removeProjectLevelArtifacts(root);
+      removeProjectLevelHooks(root);
       if (cleaned > 0) {
         process.stdout.write(`[refacil-sdd-ai] Cleaned up ${cleaned} project-level artifact(s) — global installation is active.\n`);
       }
@@ -360,7 +485,7 @@ function checkUpdate() {
   let localVersion = getPackageVersion(packageRoot);
 
   try {
-    const syncOut = syncRepoSessionMarkers(projectRoot, packageRoot);
+    const syncOut = syncRepoSessionMarkers(root, packageRoot);
     if (!syncOut.ok) {
       process.stderr.write(`[refacil-sdd-ai] session repo sync: ${syncOut.reason}\n`);
     } else {
@@ -379,7 +504,40 @@ function checkUpdate() {
     process.stderr.write(`[refacil-sdd-ai] session repo sync: ${err.message}\n`);
   }
 
-  cleanLegacySettingsHooks(projectRoot);
+  cleanLegacySettingsHooks(root);
+
+  // Self-healing: if selected-ides.json exists but global skills/hooks are missing, restore them
+  // Covers the case where the Claude Code desktop app overwrites settings.json and wipes SDD hooks,
+  // or where skills were deleted by any means while the package is still installed.
+  try {
+    const home = os.homedir();
+    const sddSelectedIDEs = readSelectedIDEs(home);
+    if (sddSelectedIDEs && sddSelectedIDEs.length > 0) {
+      const dirMap = {
+        '.claude': globalClaudeDir(home),
+        '.cursor': globalCursorDir(home),
+        '.opencode': globalOpenCodeDir(home),
+        '.codex': globalCodexDir(home),
+      };
+      const missingSkills = sddSelectedIDEs.some(
+        (ide) => dirMap[ide] && !fs.existsSync(path.join(dirMap[ide], 'skills')),
+      );
+      if (missingSkills) {
+        installSkills(packageRoot, home, sddSelectedIDEs);
+        installAgents(packageRoot, home, sddSelectedIDEs);
+        writeGlobalVersion(getPackageVersion(packageRoot));
+        process.stdout.write('[refacil-sdd-ai] Self-healed: global skills and agents restored.\n');
+      }
+      // Always verify hooks are present for all selected IDEs — idempotent, only writes if missing
+      for (const ide of ['.claude', '.cursor', '.opencode', '.codex']) {
+        if (sddSelectedIDEs.includes(ide)) {
+          installHooks(ide, home, root);
+        }
+      }
+    }
+  } catch (_) {
+    // Tolerant — self-healing must never break session startup
+  }
 
   // Step 1: update the global package if a newer version is available on npm
   try {
@@ -405,21 +563,55 @@ function checkUpdate() {
   }
 
   // Step 2: sync repo skills with the (now updated) package
-  const syncResult = syncRepoSkillsIfStale(localVersion);
+  const syncResult = syncRepoSkillsIfStale(localVersion, root);
   if (syncResult && !syncResult.failed) {
     const fromLabel = syncResult.from ? `v${syncResult.from}` : 'unknown version';
     console.log(
       `[refacil-sdd-ai] Repo skills synced (${fromLabel} -> v${syncResult.to}). ` +
-      'Restart the Claude Code or Cursor session to pick up the changes.',
+      'Restart your IDE session to pick up the changes.',
     );
-    if (methodologyMigrationPending(projectRoot).pending) {
-      writePendingUpdateFlag(projectRoot, syncResult.from, syncResult.to);
+    if (methodologyMigrationPending(root).pending) {
+      writePendingUpdateFlag(root, syncResult.from, syncResult.to);
     }
   } else if (syncResult && syncResult.failed) {
     console.log(
       `[refacil-sdd-ai] Repo skills are out of date with the global package (v${syncResult.to}) ` +
       'but automatic sync failed. Run manually: refacil-sdd-ai update',
     );
+  }
+
+  // Inject CodeGraph suggestion if the user has not set a preference yet
+  maybeInjectCodegraphSuggestion();
+
+  // CodeGraph auto-refresh — silent background operation, no user interaction
+  try {
+    const { loadBranchConfigWithSources } = require('../lib/config');
+    const cfgInfo = loadBranchConfigWithSources(root);
+    const cgMode = cfgInfo.codegraphMode;
+    if (cgMode === 'enabled' || cgMode === 'per-repo') {
+      if (!codegraph.isInstalled()) {
+        // CLI missing: surface via notify-update banner (blocking once)
+        writePendingUpdateFlag(root, localVersion, localVersion);
+        process.stdout.write(
+          '[refacil-sdd-ai] CodeGraph is enabled but the CLI is not installed. ' +
+          'Run /refacil:update to install and configure it.\n',
+        );
+      } else if (!codegraph.isInitialized(root)) {
+        // Not indexed: start automatically in the background, no question needed
+        codegraph.init(root);
+        process.stdout.write('[refacil-sdd-ai] CodeGraph: building index in background (~30s).\n');
+      } else if (codegraph.isStale(root)) {
+        // Index exists but new commits since last init: refresh silently
+        codegraph.init(root);
+        process.stdout.write('[refacil-sdd-ai] CodeGraph: refreshing index (new commits detected).\n');
+      } else {
+        // Initialized and up to date. If the timestamp file is absent (index was built
+        // externally, not through our tools), write it now so isStale() has a reference.
+        codegraph.touchTimestamp(root);
+      }
+    }
+  } catch (_) {
+    // Tolerant — CodeGraph state check must never break session startup
   }
 }
 
@@ -435,38 +627,8 @@ function checkReview() {
   }
 
   const command = (input.tool_input && input.tool_input.command) || '';
-  if (!command.match(/git\s+push/)) return;
-
-  const sddChangesDir = path.join(projectRoot, 'refacil-sdd', 'changes');
-  const legacyChangesDir = path.join(projectRoot, 'openspec', 'changes');
-  const changesDir = fs.existsSync(sddChangesDir) ? sddChangesDir : legacyChangesDir;
-  if (!fs.existsSync(changesDir)) return;
-
-  const entries = fs.readdirSync(changesDir, { withFileTypes: true });
-  const activeChanges = entries.filter(
-    (e) => e.isDirectory() && e.name !== 'archive',
-  );
-
-  if (activeChanges.length === 0) return;
-
-  const missing = activeChanges.filter(
-    (e) => !fs.existsSync(path.join(changesDir, e.name, '.review-passed')),
-  );
-
-  if (missing.length > 0) {
-    const names = missing.map((e) => e.name).join(', ');
-    const reason =
-      missing.length === 1
-        ? `[refacil-sdd-ai] Review pending for: ${names}. ` +
-          'Stop the push and run /refacil:review on that change before pushing code. ' +
-          'If the review passes, retry the git push. ' +
-          'If the review requires corrections, report the findings to the user and DO NOT retry the push.'
-        : `[refacil-sdd-ai] Multiple changes without approved review: ${names}. ` +
-          'Stop the push and ask the user to explicitly select which change they want to push. ' +
-          'Then run /refacil:review <change-name> for that specific change and retry the push. ' +
-          'Do not run automatic review without explicit selection when there is more than one pending change.';
-    console.log(JSON.stringify({ decision: 'block', reason }));
-  }
+  const block = evaluateGitPushReview(command, resolveWorkspaceRoot({ hookInput: input, skipStdin: true }));
+  if (block) console.log(JSON.stringify(block));
 }
 
 // --- Branch config prompt (used by init) ---
@@ -623,6 +785,9 @@ async function init() {
   // Prompt for global branch configuration (skipped with --yes/--defaults or non-TTY)
   await promptBranchConfig();
 
+  // Prompt for CodeGraph integration mode (skipped with --yes/--defaults or non-TTY)
+  await promptCodegraphMode(os.homedir());
+
   if (selectedIDEs.length === 0) {
     console.log('\n  No IDEs selected. Nothing installed.\n');
     console.log('  Re-run with: refacil-sdd-ai init --all   to install for all IDEs');
@@ -749,33 +914,7 @@ function update() {
 
   const homeDir = os.homedir();
 
-  // Source of truth: persisted selection from init.
-  // Fall back to detection for backward compat (users who had the methodology installed
-  // before selected-ides.json existed). In that case, infer selection from IDE dirs
-  // already present in this repo and persist the result so future runs use the file.
-  let selectedIDEs = readSelectedIDEs();
-  if (!selectedIDEs) {
-    const detectedIds = detectInstalledIDEs();
-    const hasClaudeDir = detectedIds.includes('claude') ||
-      fs.existsSync(path.join(globalClaudeDir(homeDir), 'skills')) ||
-      fs.existsSync(path.join(projectRoot, '.claude'));
-    const hasCursorDir = detectedIds.includes('cursor') ||
-      fs.existsSync(path.join(globalCursorDir(homeDir), 'skills')) ||
-      fs.existsSync(path.join(projectRoot, '.cursor'));
-    const hasOpenCodeDir = detectedIds.includes('opencode') ||
-      fs.existsSync(path.join(globalOpenCodeDir(homeDir), 'skills')) ||
-      fs.existsSync(path.join(projectRoot, '.opencode'));
-    const hasCodexFallback = detectedIds.includes('codex') ||
-      fs.existsSync(path.join(globalCodexDir(homeDir), 'skills'));
-    selectedIDEs = [
-      hasClaudeDir && '.claude',
-      hasCursorDir && '.cursor',
-      hasOpenCodeDir && '.opencode',
-      hasCodexFallback && '.codex',
-    ].filter(Boolean);
-    // Persist for future runs so detection only happens once
-    if (selectedIDEs.length > 0) writeSelectedIDEs(selectedIDEs);
-  }
+  const selectedIDEs = resolveSelectedIDEsForRepo(projectRoot, homeDir);
 
   const hasClaudeDir = selectedIDEs.includes('.claude');
   const hasCursorDir = selectedIDEs.includes('.cursor');
@@ -887,7 +1026,78 @@ function update() {
     console.error(`  Warning: session repo sync: ${err.message}`);
   }
 
+  try {
+    const { loadBranchConfigWithSources } = require('../lib/config');
+    const cfgInfo = loadBranchConfigWithSources(projectRoot);
+    if (cfgInfo.codegraphMode && cfgInfo.codegraphMode !== 'disabled') {
+      codegraph.registerMcp(selectedIDEs, homeDir);
+    }
+  } catch (_) {}
+
   console.log('\n  RESTART your IDE session to apply the changes.\n');
+}
+
+/**
+ * Per-repo CLAUDE.md, .cursorrules, ignore files, and session markers (compact-guidance, testing-policy).
+ * IDE list: ~/.refacil-sdd-ai/selected-ides.json, with the same fallback heuristics as `update`.
+ * Does not install skills or hooks (use `init` / `update`).
+ */
+function syncRepoIde() {
+  console.log('\n  refacil-sdd-ai: sync-repo-ide — per-repo files for selected IDEs...\n');
+
+  const homeDir = os.homedir();
+  const { selectedIDEs, ignoreResult, sessionOut } = syncRepoIdeFiles(packageRoot, projectRoot, homeDir);
+
+  if (selectedIDEs.length === 0) {
+    const selPath = path.join(homeDir, '.refacil-sdd-ai', 'selected-ides.json');
+    console.log('  No IDE selection found and nothing could be inferred.');
+    console.log(`  Run: refacil-sdd-ai init   (writes ${selPath})\n`);
+    return;
+  }
+
+  console.log(`  IDE selection: ${selectedIDEs.join(', ')}`);
+
+  try {
+    const IDE_TO_IGNORE = { '.claude': '.claudeignore', '.cursor': '.cursorignore', '.opencode': '.opencodeignore' };
+    const ignoreNames = selectedIDEs.map((d) => IDE_TO_IGNORE[d]).filter(Boolean).join(', ');
+    const s = ignoreResult.claude || ignoreResult.cursor || ignoreResult.opencode;
+    if (s && s.status === 'created') {
+      console.log(`  ${ignoreNames} created`);
+    } else if (s && s.status === 'updated') {
+      console.log(`  ${ignoreNames} updated (${s.added} entries added)`);
+    } else if (ignoreNames) {
+      console.log(`  ${ignoreNames} are up to date`);
+    }
+  } catch (err) {
+    console.error(`  Warning: could not sync ignore files: ${err.message}`);
+  }
+
+  if (sessionOut && !sessionOut.ok) {
+    console.error(`  Warning: session repo sync: ${sessionOut.reason || 'unknown'}`);
+  } else if (sessionOut && sessionOut.ok) {
+    try {
+      if (sessionOut.compact.status === 'error') {
+        console.error(`  Warning: could not sync compact-guidance: ${sessionOut.compact.message}`);
+      } else if (sessionOut.compact.status === 'appended') {
+        console.log('  compact-guidance block added to AGENTS.md');
+      } else if (sessionOut.compact.status === 'replaced') {
+        console.log('  compact-guidance block updated in AGENTS.md');
+      }
+      if (sessionOut.testing.status === 'error') {
+        console.error(`  Warning: could not sync testing-policy: ${sessionOut.testing.message}`);
+      } else if (sessionOut.testing.status === 'created-file') {
+        console.log('  testing-policy: created .agents/testing.md');
+      } else if (sessionOut.testing.status === 'appended' || sessionOut.testing.status === 'written-empty') {
+        console.log('  testing-policy block added to .agents/testing.md');
+      } else if (sessionOut.testing.status === 'replaced') {
+        console.log('  testing-policy block updated in .agents/testing.md');
+      }
+    } catch (err) {
+      console.error(`  Warning: session repo sync: ${err.message}`);
+    }
+  }
+
+  console.log('');
 }
 
 function clean() {
@@ -895,8 +1105,10 @@ function clean() {
 
   const homeDir = os.homedir();
 
-  const selectedIDEs = readSelectedIDEs() || ['claude', 'cursor', 'opencode'];
-  const globalCount = removeGlobalSkills(homeDir, selectedIDEs);
+  const selectedIDEs = resolveSelectedIDEsForRepo(projectRoot, homeDir);
+  const fallbackIDEs = ['.claude', '.cursor', '.opencode', '.codex'];
+  const ideDirsForClean = selectedIDEs.length > 0 ? selectedIDEs : fallbackIDEs;
+  const globalCount = removeGlobalSkills(homeDir, ideDirsForClean);
   if (globalCount > 0) {
     console.log(`  ${globalCount} global skills removed from IDE user directories`);
   }
@@ -906,33 +1118,42 @@ function clean() {
     console.log(`  ${count} project-level skills removed from .claude/skills/ and .cursor/skills/`);
   }
 
-  if (uninstallHooks('.claude', homeDir)) {
-    console.log('  SDD-AI hooks removed from ~/.claude/settings.json');
-  } else {
-    console.log('  No SDD-AI hooks found to remove in ~/.claude/settings.json.');
-  }
-  if (uninstallHooks('.cursor', homeDir)) {
-    console.log('  SDD-AI hooks removed from ~/.cursor/hooks.json');
-  }
-
-  // Always attempt to uninstall the global OpenCode plugin
-  try {
-    if (uninstallOpenCodePlugin(homeDir)) {
-      console.log('  OpenCode plugin removed from global plugins directory');
+  if (ideDirsForClean.includes('.claude') || ideDirsForClean.includes('claude')) {
+    if (uninstallHooks('.claude', homeDir)) {
+      console.log('  SDD-AI hooks removed from ~/.claude/settings.json');
+    } else {
+      console.log('  No SDD-AI hooks found to remove in ~/.claude/settings.json.');
     }
-  } catch (err) {
-    console.error(`  Warning: could not remove OpenCode plugin: ${err.message}`);
+  }
+  if (ideDirsForClean.includes('.cursor') || ideDirsForClean.includes('cursor')) {
+    if (uninstallHooks('.cursor', homeDir)) {
+      console.log('  SDD-AI hooks removed from ~/.cursor/hooks.json');
+    }
   }
 
-  // Remove Codex global artifacts (skills + agents) and hooks
-  try {
-    removeCodexArtifacts(homeDir);
-    console.log('  Codex skills and agents removed from ~/.codex/');
-  } catch (err) {
-    console.error(`  Warning: could not remove Codex artifacts: ${err.message}`);
+  if (ideDirsForClean.includes('.opencode') || ideDirsForClean.includes('opencode')) {
+    try {
+      removeOpenCodeGlobalArtifacts(homeDir);
+      if (uninstallOpenCodePlugin(homeDir)) {
+        console.log('  OpenCode global skills, agents, and plugin removed');
+      } else {
+        console.log('  OpenCode global artifacts removed from config directory');
+      }
+    } catch (err) {
+      console.error(`  Warning: could not remove OpenCode global artifacts: ${err.message}`);
+    }
   }
-  if (uninstallHooks('.codex', homeDir)) {
-    console.log('  SDD-AI hooks removed from ~/.codex/config.toml');
+
+  if (ideDirsForClean.includes('.codex') || ideDirsForClean.includes('codex')) {
+    try {
+      removeCodexArtifacts(homeDir);
+      console.log('  Codex skills and agents removed from ~/.codex/');
+    } catch (err) {
+      console.error(`  Warning: could not remove Codex artifacts: ${err.message}`);
+    }
+    if (uninstallHooks('.codex', homeDir)) {
+      console.log('  SDD-AI hooks removed from ~/.codex/config.toml');
+    }
   }
 
   // Clean project-level OpenCode artifacts if .opencode/ directory is present
@@ -983,19 +1204,23 @@ function help() {
     init          Install skills globally for Claude Code, Cursor, OpenCode and/or Codex (interactive IDE selector).
                   Use --all to install for all four IDEs without prompting.
                   Use --yes or --defaults to skip interactive branch config prompts.
-                  Creates CLAUDE.md, .cursorrules and .opencode/opencode.json as appropriate.
+                  Creates repo stubs (CLAUDE.md, .cursorrules, ignores) for selected IDEs; same logic as sync-repo-ide.
                   Migrates any project-level artifacts to global dirs automatically.
-    update        Re-copy skills for all detected IDEs to global user dirs
+    update        Re-copy skills for all selected IDEs to global user dirs
+    sync-repo-ide Same IDE list as update (selected-ides.json): CLAUDE.md, .cursorrules,
+                  ignore files, compact-guidance + testing-policy in repo (no global install)
     migration-pending  Same validation as hooks/notify-update: list migrations (exit 1 if any; --json)
     check-update   Sync skills, compact-guidance (AGENTS.md), and testing-policy block (.agents/testing.md) at session start
     notify-update  Notify methodology migration only if applicable (UserPromptSubmit hook)
     check-review   Verify that review has been completed (used by PreToolUse hook)
     compact-bash  Rewrite bare Bash commands to reduce tokens (used by PreToolUse hook)
     compact       Subcommands for the compact-bash hook:
-                    compact stats      - Full stats (hook + already-compact) and estimated savings
+                    compact stats      - Stats (hook + CodeGraph) and estimated savings
+                    compact log-codegraph-event - Log CodeGraph session (--skill --has-graph --tool-calls --tokens)
                     compact disable    - Temporarily disable rewrite
                     compact enable     - Re-enable rewrite
-                    compact clear-log  - Clear the history log
+                    compact clear-log  - Clear compact.log
+                    compact codegraph-clear-log - Clear codegraph.log
     bus           Subcommands for the inter-agent chat room (refacil-bus):
                     bus start          - Start the local broker (auto-spawn detached)
                     bus stop           - Stop the broker
@@ -1003,15 +1228,17 @@ function help() {
                     bus serve          - (internal) Run the broker in foreground
                     bus join --room <room> [--session <s>] [--intro "..."]
                     bus leave [--session <s>]
-                    bus say --text "..." [--session <s>]
-                    bus ask --to <name|all|*|everyone> --text "..." [--wait N] [--session <s>]
-                    bus reply --text "..." [--correlation <id>] [--to <name>]
+                    bus say --text "..." [--from-env VAR] [--session <s>]
+                    bus ask --to <name|all|*|everyone> --text "..." [--from-env VAR] [--wait N] [--session <s>]
+                    bus reply --text "..." [--from-env VAR] [--correlation <id>] [--to <name>]
                     bus history [--n N] [--session <s>]
                     bus inbox [--session <s>]
                     bus rooms
                     bus watch <session> [--room <room>]  (live panel, no tokens)
                     bus attend [--timeout N]             (listen for directed questions)
                     bus view                             (open the web UI in the browser)
+    read-spec     Read a Markdown spec aloud in the browser (on-device TTS):
+                    read-spec --file <path> [--lang es] [--voice M3] [--speed 1]
     sdd           Subcommands for managing SDD-AI artifacts in refacil-sdd/:
                     sdd new-change <name>         Create a change with proposal/design/tasks/specs scaffold
                     sdd archive <name>             Archive a change to refacil-sdd/changes/archive/
@@ -1026,6 +1253,14 @@ function help() {
                       [--base-branch <branch>]      Base branch for new changes
                       [--protected-branches <csv>]  Protected branches (comma-separated)
                       [--artifact-language <lang>]  Artifact language: english (default) or spanish
+    kapso         Subcommands for Kapso WhatsApp notification setup:
+                    kapso setup       Interactive setup of ~/.refacil-sdd-ai/kapso.env
+                                      (KAPSO_API_KEY, KAPSO_PHONE_NUMBER_ID, NOTIFY_PHONE)
+                    kapso preflight   Check credentials and print 24h window notice (--json)
+                    kapso notify      Send a WhatsApp notification (success|failure) with flags
+    autopilot     Subcommands for the autopilot pipeline:
+                    autopilot ready-message   Generate the pre-flight ready message
+                                              (--change <name> [--ide <ide>] [--lang es|en])
     clean         Remove SDD-AI hooks from global IDE config dirs and skills from global dirs
     help          Show this help
 
@@ -1033,7 +1268,7 @@ function help() {
     1. npm install -g refacil-sdd-ai
     2. refacil-sdd-ai init
     3. RESTART your IDE session (Claude Code, Cursor, OpenCode, or Codex)
-    4. Run: /refacil:setup (generates AGENTS.md for your project)
+    4. Run: /refacil:setup (generates AGENTS.md + sync-repo-ide stubs/ignores for selected IDEs)
 
   Global installation paths (this machine):
     - Claude Code: ${claudePath}/skills/, ${claudePath}/agents/
@@ -1053,7 +1288,8 @@ function help() {
 
 // --- Main ---
 
-const command = process.argv[2] || 'help';
+const args = process.argv.slice(2);
+const command = args[0] || 'help';
 
 if (command === '--version' || command === '-v') {
   console.log(getPackageVersion(packageRoot));
@@ -1069,6 +1305,9 @@ switch (command) {
     break;
   case 'update':
     update();
+    break;
+  case 'sync-repo-ide':
+    syncRepoIde();
     break;
   case 'migration-pending':
     migrationPendingCmd();
@@ -1086,13 +1325,162 @@ switch (command) {
     compactBash.run();
     break;
   case 'compact':
-    handleCompact(process.argv[3]);
+    handleCompact(process.argv[3], process.argv.slice(4));
     break;
   case 'bus':
     handleBus(process.argv[3], process.argv.slice(4), packageRoot);
     break;
+  case 'read-spec':
+    handleReadSpec(process.argv.slice(3), packageRoot, projectRoot).catch((err) => {
+      console.error(`  Error: ${err.message}`);
+      process.exit(1);
+    });
+    break;
   case 'sdd':
     handleSdd(process.argv[3], process.argv.slice(4), projectRoot);
+    break;
+  case 'codegraph': {
+    const cgSub = process.argv[3];
+    if (cgSub === 'init') {
+      codegraph.init(projectRoot);
+      codegraph.registerMcp(readSelectedIDEs() || ['.claude', '.cursor', '.opencode', '.codex']);
+      console.log('[refacil-sdd-ai] CodeGraph indexing started in background. Run your next /refacil:explore when it finishes.');
+    } else if (cgSub === 'status') {
+      const { loadBranchConfigWithSources } = require('../lib/config');
+      const cfgInfo = loadBranchConfigWithSources(projectRoot);
+      const installed = codegraph.isInstalled();
+      const initialized = codegraph.isInitialized(projectRoot);
+      if (process.argv.includes('--json')) {
+        console.log(JSON.stringify({
+          installed,
+          initialized,
+          mode: cfgInfo.codegraphMode,
+          modeSource: cfgInfo.sources.codegraphMode,
+        }));
+      } else {
+        console.log('  CodeGraph status:');
+        console.log(`    installed:    ${installed}`);
+        console.log(`    initialized:  ${initialized} (${projectRoot})`);
+        console.log(`    mode:         ${cfgInfo.codegraphMode || '(not set)'} [source: ${cfgInfo.sources.codegraphMode}]`);
+      }
+    } else if (cgSub === 'setup') {
+      // Install CLI if missing, register MCP, then index synchronously so the caller
+      // (skill / agent) does not continue until .codegraph/ is fully built.
+      const { execSync } = require('child_process');
+      const selectedIDEs = readSelectedIDEs() || ['.claude', '.cursor', '.opencode', '.codex'];
+      if (!codegraph.isInstalled()) {
+        process.stdout.write('[refacil-sdd-ai] Installing @colbymchenry/codegraph globally...\n');
+        try {
+          execSync('npm install -g @colbymchenry/codegraph', { stdio: 'inherit', timeout: 120000 });
+          process.stdout.write('[refacil-sdd-ai] @colbymchenry/codegraph installed.\n');
+        } catch (err) {
+          process.stderr.write(`[refacil-sdd-ai] Failed to install codegraph: ${err.message}\n`);
+          process.exit(1);
+        }
+      }
+      codegraph.registerMcp(selectedIDEs);
+      if (!codegraph.isInitialized(projectRoot)) {
+        process.stdout.write(`[refacil-sdd-ai] Initializing CodeGraph at ${projectRoot} ...\n`);
+        try {
+          // Step 1: init creates .codegraph/ structure (fast, ~1s).
+          execSync('codegraph init', {
+            stdio: 'inherit',
+            cwd: projectRoot,
+            timeout: 30000,
+            shell: true,
+          });
+          process.stdout.write('[refacil-sdd-ai] Building index (this may take ~30s) ...\n');
+          // Step 2: index builds the actual symbol graph.
+          // Run synchronously with inherited stdio so the agent sees all output and
+          // waits for the graph to be fully built before continuing.
+          execSync('codegraph index', {
+            stdio: 'inherit',
+            cwd: projectRoot,
+            timeout: 300000, // 5 min ceiling for large repos
+            shell: true,
+          });
+          // Record timestamp so isStale() can detect subsequent commits
+          try {
+            const lastInitPath = path.join(projectRoot, '.codegraph', '.refacil-last-init');
+            fs.mkdirSync(path.dirname(lastInitPath), { recursive: true });
+            fs.writeFileSync(lastInitPath, new Date().toISOString());
+          } catch (_) {}
+          process.stdout.write('[refacil-sdd-ai] CodeGraph index complete. .codegraph/ is ready.\n');
+        } catch (err) {
+          process.stderr.write(`[refacil-sdd-ai] codegraph index failed: ${err.message}\n`);
+          process.exit(1);
+        }
+      } else {
+        console.log('[refacil-sdd-ai] CodeGraph already initialized for this repo. MCP registration refreshed.');
+      }
+    } else {
+      console.error(`  Unknown codegraph subcommand: ${cgSub || '(none)'}. Usage: refacil-sdd-ai codegraph <init|setup|status>`);
+      process.exit(1);
+    }
+    break;
+  }
+  case 'kapso': {
+    const kapsoSub = args[1];
+    const kapso = require('../lib/kapso');
+    if (kapsoSub === 'setup') {
+      kapso.setup().catch((err) => {
+        console.error(`  Error during kapso setup: ${err.message}`);
+        process.exit(1);
+      });
+    } else if (kapsoSub === 'preflight') {
+      const result = kapso.preflight();
+      process.stdout.write(JSON.stringify(result) + '\n');
+      process.exit(0);
+    } else if (kapsoSub === 'notify') {
+      const notifyType = args[2]; // "success" or "failure"
+      if (!notifyType) {
+        console.error('  Usage: refacil-sdd-ai kapso notify <success|failure> [flags]');
+        process.exit(1);
+      }
+      // Parse flags from process.argv
+      const getFlag = (flag, fallback = '') => {
+        const idx = process.argv.indexOf(flag);
+        return idx !== -1 && process.argv[idx + 1] ? process.argv[idx + 1] : fallback;
+      };
+      // Compute duration from marker startedAt (authoritative) or fall back to --duration flag.
+      let computedDuration = getFlag('--duration', '0');
+      try {
+        const markerPath = path.join(findProjectRoot(), 'refacil-sdd', '.autopilot-active');
+        if (fs.existsSync(markerPath)) {
+          const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+          if (marker.startedAt) {
+            const elapsed = Math.round((Date.now() - new Date(marker.startedAt).getTime()) / 60000);
+            computedDuration = String(elapsed);
+          }
+        }
+      } catch (_) { /* keep fallback */ }
+      const opts = {
+        repo:       getFlag('--repo'),
+        change:     getFlag('--change'),
+        branch:     getFlag('--branch'),
+        tasks:      getFlag('--tasks', '0/0'),
+        duration:   computedDuration,
+        pr:         getFlag('--pr') || null,
+        apply:      getFlag('--apply', '0'),
+        test:       getFlag('--test', '0'),
+        review:     getFlag('--review', '0'),
+        warnings:   getFlag('--warnings', ''),
+        phase:      getFlag('--phase'),
+        lastCommit: getFlag('--last-commit'),
+        error:      getFlag('--error'),
+      };
+      kapso.notify(notifyType, opts).catch((err) => {
+        console.error(`  Error: ${err.message}`);
+        process.exit(1);
+      });
+    } else {
+      console.error(`  Unknown kapso subcommand: ${kapsoSub || '(none)'}. Usage: kapso <setup|preflight|notify>`);
+      process.exit(1);
+    }
+    break;
+  }
+  case 'autopilot':
+    handleAutopilot(process.argv[3], process.argv.slice(4));
     break;
   case 'clean':
     clean();

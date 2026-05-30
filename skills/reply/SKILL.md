@@ -15,7 +15,7 @@ Sends a response to the last question directed to this session. **$ARGUMENTS** =
 Run via `Bash`:
 
 ```bash
-refacil-sdd-ai bus reply --text "<response>"
+refacil-sdd-ai bus reply --text "[response]"
 ```
 
 The broker:
@@ -32,18 +32,51 @@ Report to the user that the response was sent.
 - **`reply`**: always when you are responding to something you were asked. This allows the other side in `ask --wait` to unblock automatically.
 - **`say`**: general announcement unrelated to a previous question.
 
+## Safe bus text delivery
+
+**Use `--text` for simple messages** (no special characters, single-line):
+```bash
+refacil-sdd-ai bus reply --text "Simple response here"
+```
+
+**Do NOT use `<` or `>` inside `--text`** — shells may interpret them as redirection operators and truncate or discard the message.
+
+For messages containing `<`, `>`, `|`, newlines, or other special characters, use `--from-env`:
+
+**PowerShell (Windows)**:
+```powershell
+$env:BUS_TEXT = "integrationPoint: POST /pay`noutputContract: {status<string>, id<uuid>}"
+refacil-sdd-ai bus reply --from-env BUS_TEXT
+Remove-Item Env:BUS_TEXT
+```
+
+**bash (inline, preferred — automatic cleanup)**:
+```bash
+BUS_TEXT="integrationPoint: POST /pay
+outputContract: {status<string>, id<uuid>}" refacil-sdd-ai bus reply --from-env BUS_TEXT
+```
+
+**bash (export + unset alternative)**:
+```bash
+export BUS_TEXT="response with <special> chars"
+refacil-sdd-ai bus reply --from-env BUS_TEXT
+unset BUS_TEXT
+```
+
+> Note: the CLI cannot perform cleanup itself — it runs as a child process and cannot modify the parent shell's environment. Cleanup (`Remove-Item` / `unset`) is the responsibility of the invoking script or shell.
+
 ## Contract-focused reply format (for integration questions)
 
 When replying to cross-repo integration clarifications, prefer this structure so the other side can continue without ambiguity:
 
 ```text
-integrationPoint: <confirmed endpoint/event/queue + direction>
-inputContract: <confirmed fields/validation>
-outputContract: <confirmed outputs/status/errors>
-compatibility: <version/constraints, or "unknown">
-sourceOfTruth: <file/path/symbol in this repo>
-confidence: <high|medium|low>
-openQuestions: <none | list of unresolved points>
+integrationPoint: [confirmed endpoint/event/queue + direction]
+inputContract: [confirmed fields/validation]
+outputContract: [confirmed outputs/status/errors]
+compatibility: [version/constraints, or "unknown"]
+sourceOfTruth: [file/path/symbol in this repo]
+confidence: [high|medium|low]
+openQuestions: [none | list of unresolved points]
 ```
 
 If you cannot confirm a field, answer with `unknown` and include the missing evidence in `openQuestions`.
@@ -57,5 +90,5 @@ If you cannot confirm a field, answer with `unknown` and include the missing evi
 - If there is no pending question directed to you and you do not want to link it, use `/refacil:say` instead.
 - If you were asked multiple questions and want to respond to a specific older one, pass `--correlation <id>` explicitly:
   ```bash
-  refacil-sdd-ai bus reply --text "..." --correlation <id>
+  refacil-sdd-ai bus reply --text "..." --correlation [id]
   ```

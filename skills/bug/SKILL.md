@@ -36,11 +36,41 @@ If `$ARGUMENTS` does not bring enough information, ask the user:
 
 If `$ARGUMENTS` is already clear, do not ask again.
 
+### Step 1.5: CodeGraph availability check
+
+Run `refacil-sdd-ai codegraph status --json` and set `codegraphAvailable`:
+- `true` if `installed === true` AND `initialized === true`
+- `false` otherwise
+
+**If `mode` is `enabled` or `per-repo` but `codegraphAvailable` is `false`**:
+
+---
+
+**[GATE — STOP AND WAIT: CodeGraph not indexed]**
+
+Do NOT proceed to Step 2. Do NOT delegate to the sub-agent. STOP and ask the user exactly this, then wait for their reply:
+
+```
+CodeGraph is enabled but not indexed for this repo (~30s to build).
+Bug investigation traces call graphs — CodeGraph makes it significantly more accurate.
+
+Do you want me to run /refacil:update first to build the index?
+  yes → run /refacil:update then continue with the investigation
+  no  → continue with standard investigation now
+```
+
+Only after the user replies:
+- **"yes"** (or "si", "dale", "sí", "go", "ok"): immediately execute `/refacil:update`.
+- **"no"** (or "skip", "continue", "continúa"): set `codegraphAvailable: false` and continue.
+
+---
+
 ### Step 2: Delegate investigation to the refacil-debugger sub-agent (mode: investigation)
 
 Invoke the `refacil-debugger` sub-agent passing it:
 - `mode: investigation`
 - `description`: complete bug description (collected in Step 1 or from `$ARGUMENTS`).
+- `codegraphAvailable: true | false` (from Step 1.5).
 
 The sub-agent:
 - Reproduces and minimizes the failure scope first.
@@ -49,6 +79,14 @@ The sub-agent:
 - Validates hypotheses with explicit evidence.
 - Reviews recent commits if the bug is new.
 - Returns hypotheses ordered by confidence + proposed correction, fenced as ` ```refacil-debug-investigation `.
+
+After investigation completes, log telemetry silently:
+
+```bash
+refacil-sdd-ai compact log-codegraph-event --skill debugger --has-graph <true|false> --tool-calls <N> --tokens <N>
+```
+
+Same estimation criteria as `explore/SKILL.md` Step 1.5. Repeat after re-investigations when applicable.
 
 ### Step 3: Confirm hypothesis with the user
 
@@ -79,61 +117,20 @@ If the sub-agent reported `crossRepo: true` in any hypothesis: before implementi
 
 ### Step 4: Validate working branch (before implementing)
 
-Run `git branch --show-current` to get the current branch.
+1. Run `git branch --show-current` → `currentBranch`.
+2. Run `refacil-sdd-ai sdd config --json` and parse `protectedBranches` and `baseBranch`.
+   - If the command fails or exits non-zero, fall back to:
+     - `protectedBranches` = [master, main]
+     - `baseBranch` = main (or master if main does not exist in the repo)
 
-If the current branch is already a working branch (`feature/*`, `fix/*`, `hotfix/*`, `refactor/*`, etc.), continue without interruption to Step 5.
+**Decision (apply before any gate):**
 
-If the current branch is protected, execute the 3-gate protocol below strictly. Each gate is a hard stop — do not proceed to the next gate until the user has replied.
+- If `currentBranch` is **not** listed in `protectedBranches` → you are already on a writable branch. Continue without interruption to **Step 5**. Do **not** ask for a task ID. Do **not** create another branch.
+- If `currentBranch` **is** listed in `protectedBranches` → **read `METHODOLOGY-CONTRACT.md §4 — Protected branch policy`** before acting, then execute the 3-gate protocol defined there strictly. Each gate is a hard stop — do not proceed to the next gate until the user has replied.
 
----
+**See `METHODOLOGY-CONTRACT.md §4 — Protected branch policy`** for the complete GATE 1 / GATE 2 / GATE 3 protocol.
 
-**[GATE 1 — STOP AND WAIT: ask for task identifier]**
-
-Ask the user exactly this question and then STOP. Do NOT run any git command. Do NOT propose a branch name. Do NOT continue to Gate 2 until the user replies:
-
-> "What is the task number or identifier for this branch? (e.g. SEGINF-20, REF-123, or a short descriptive name)"
-
-If the user says they have no ID, note that and proceed to Gate 2 with `<ID> = none`.
-
----
-
-**[GATE 2 — STOP AND WAIT: propose branch name and ask for approval]**
-
-Only after receiving the user's reply to Gate 1:
-
-1. Verify clean working directory (`git status --porcelain`).
-2. If there are uncommitted changes, ask for approval to stash them (`git stash push -m "auto-stash-refacil"`). Do NOT stash without approval.
-3. Detect the effective configuration by running:
-   ```
-   refacil-sdd-ai sdd config --json
-   ```
-   Parse `baseBranch` and `protectedBranches` from the JSON output.
-   If the command fails or exits non-zero, fall back to:
-   - `protectedBranches` = [master, main]
-   - `baseBranch` = main (or master if main does not exist in the repo)
-4. Determine the base branch:
-   - Use the `baseBranch` value from the config (or the fallback).
-   - Only if that branch does not exist in the repo (new repo), use `main` or `master` as a temporary exception and recommend adopting the standard flow.
-5. Compose the branch name with `fix/` prefix:
-   - Bugfix: `fix/<ID>` (e.g. `fix/SEGINF-20`)
-   - Without ID: propose a short descriptive name (e.g. `fix/session-timeout-redis`)
-6. Present the proposed name and ask for approval. Then STOP. Do NOT run `git checkout` or `git switch`. Do NOT create the branch yet. Wait for the user's explicit confirmation:
-
-> "I'll create branch `<proposed-name>` from `<base-branch>`. Shall I proceed?"
-
----
-
-**[GATE 3 — execute only after explicit approval from Gate 2]**
-
-Only after the user explicitly confirms (e.g. "yes", "go", "ok", "proceed"):
-
-1. Switch to the base branch and update it (`git checkout <base>` + `git pull origin <base>`).
-2. Create the working branch (`git checkout -b <branch-name>`).
-3. If a stash was approved in Gate 2, restore it (`git stash pop`).
-
-If the user does not approve at Gate 2, stop entirely. Do not create any branch. Do not continue with implementation.
-
----
+Apply-specific annotation: use `fix/<ID>` as the branch prefix (e.g. `fix/SEGINF-20`, `fix/session-timeout-redis`).
 
 ### Step 5: Delegate implementation to the refacil-debugger sub-agent (mode: fix)
 
@@ -148,7 +145,7 @@ Invoke the `refacil-debugger` sub-agent passing it:
 The sub-agent:
 - Implements the minimal and focused fix.
 - Generates regression tests (reproduces the bug + verifies the fix + normal-path assertions where warranted).
-- Creates `refacil-sdd/changes/fix-<name>/summary.md` with traceability.
+- Creates `refacil-sdd/changes/fix-<name>/summary.md` with traceability. This `fix-*` folder is the approved operational exception to the regular proposal artifacts: it does not need `proposal.md`, `design.md`, `tasks.md`, or `specs.md` to be archived later, but it must include a substantive `summary.md`, regression test evidence from the debugger run, and an approved review before archive.
 - Runs **`testCommand`** per **`METHODOLOGY-CONTRACT.md §3.1`** (narrowed when `scoped`; full baseline only when `full` or narrow fallback warns).
 - Returns the report fenced as ` ```refacil-debug-fix `.
 
@@ -175,6 +172,8 @@ If the sub-agent returned `result: "FAILED"` (tests not passing), present the fa
 - **NEVER implement without explicit user approval** (Step 3).
 - **Always validate the branch** (Step 4) before delegating the fix.
 - **Do not replicate investigation or implementation logic here** — that lives in `refacil-debugger`.
+- **`fix-*` archive exception**: do not route bug fixes through `/refacil:propose` merely to satisfy regular readiness. `fix-*` changes are valid for archive with `summary.md`, regression tests, and `.review-passed`; `/refacil:archive` documents the fix into `refacil-sdd/specs/` instead of requiring proposal artifacts.
 - Bugfix implementation output is English-only: source/test file names, identifiers, test descriptions, and code comments, regardless of the language used in user-facing text or SDD artifacts.
 - Step 3 (bus cross-repo) is **optional** — only applies if the sub-agent reported `crossRepo: true`.
-- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 6, immediately invoke the **Skill tool** with `skill: "refacil:review"`. Do not describe it in text or wait for the user to type `/refacil:review`. (See `METHODOLOGY-CONTRACT.md §5`.)
+- **CodeGraph gate (Step 1.5)**: if `mode` is `enabled`/`per-repo` and `codegraphAvailable` is `false`, the GATE is **mandatory** — never skip it. If the user replies affirmatively ("yes", "si", "sí", "dale", "ok", "go"), immediately execute `/refacil:update` without any prior text. Do not describe it. Do not ask again. (See `METHODOLOGY-CONTRACT.md §5`.)
+- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 6, immediately execute `/refacil:review`. Do not describe it in text or wait for the user to type it. (See `METHODOLOGY-CONTRACT.md §5`.)

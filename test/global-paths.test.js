@@ -1,10 +1,20 @@
 'use strict';
 
-const { test, describe } = require('node:test');
+const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { globalClaudeDir, globalCursorDir, globalOpenCodeDir, globalSddVersionPath, globalSelectedIDEsPath, readSelectedIDEs, writeSelectedIDEs } = require('../lib/global-paths');
+const {
+  globalClaudeDir,
+  globalCursorDir,
+  globalOpenCodeDir,
+  validateOpenCodeConfigDir,
+  legacyOpenCodeDirs,
+  globalSddVersionPath,
+  globalSelectedIDEsPath,
+  readSelectedIDEs,
+  writeSelectedIDEs,
+} = require('../lib/global-paths');
 
 // ── globalClaudeDir ──────────────────────────────────────────────────────────
 
@@ -55,32 +65,128 @@ describe('globalCursorDir', () => {
 // ── globalOpenCodeDir ────────────────────────────────────────────────────────
 
 describe('globalOpenCodeDir', () => {
-  test('with explicit homeDir (no appDataDir): returns homeDir/.opencode on all platforms', () => {
-    // When homeDir is injected for testing, always returns homeDir/.opencode
+  test('with explicit homeDir: returns homeDir/.config/opencode on all platforms', () => {
     const result = globalOpenCodeDir('/home/testuser');
-    assert.equal(result, path.join('/home/testuser', '.opencode'));
+    assert.equal(result, path.join('/home/testuser', '.config', 'opencode'));
   });
 
-  test('with explicit appDataDir: returns appDataDir/opencode regardless of platform', () => {
-    const result = globalOpenCodeDir('/home/testuser', '/custom/appdata');
-    assert.equal(result, path.join('/custom/appdata', 'opencode'));
-  });
-
-  test('Windows appDataDir injection overrides homeDir', () => {
-    const result = globalOpenCodeDir('C:\\Users\\Test', 'C:\\AppData\\Roaming');
-    assert.equal(result, path.join('C:\\AppData\\Roaming', 'opencode'));
+  test('honors OPENCODE_CONFIG_DIR when set', () => {
+    const custom = path.join('/tmp', 'custom-opencode');
+    const prev = process.env.OPENCODE_CONFIG_DIR;
+    process.env.OPENCODE_CONFIG_DIR = custom;
+    try {
+      assert.equal(globalOpenCodeDir(), path.resolve(custom));
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = prev;
+    }
   });
 
   test('production default (no args): returns a non-empty string path ending with opencode', () => {
     const result = globalOpenCodeDir();
     assert.ok(typeof result === 'string' && result.length > 0);
-    assert.ok(result.endsWith('opencode') || result.endsWith('opencode' + path.sep));
+    assert.ok(result.endsWith(path.join('.config', 'opencode')) || result.endsWith('opencode'));
   });
 
-  test('production default (null homeDir): returns a non-empty string path ending with opencode', () => {
-    const result = globalOpenCodeDir(null, null);
-    assert.ok(typeof result === 'string' && result.length > 0);
-    assert.ok(result.endsWith('opencode') || result.endsWith('opencode' + path.sep));
+  test('production default (null homeDir): returns homeDir/.config/opencode', () => {
+    const os = require('os');
+    const result = globalOpenCodeDir(null);
+    assert.equal(result, path.join(os.homedir(), '.config', 'opencode'));
+  });
+});
+
+describe('validateOpenCodeConfigDir — CR-01', () => {
+  const saved = process.env.OPENCODE_CONFIG_DIR;
+  let stderrBuf;
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = saved;
+  });
+
+  beforeEach(() => {
+    stderrBuf = '';
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...args) => {
+      stderrBuf += String(chunk);
+      return orig(chunk, ...args);
+    };
+  });
+
+  test('returns true when OPENCODE_CONFIG_DIR is unset', () => {
+    delete process.env.OPENCODE_CONFIG_DIR;
+    assert.equal(validateOpenCodeConfigDir(), true);
+  });
+
+  test('returns false with stderr when directory does not exist', () => {
+    const os = require('os');
+    const missing = path.join(os.tmpdir(), 'refacil-nonexistent-opencode-config');
+    process.env.OPENCODE_CONFIG_DIR = missing;
+    assert.equal(validateOpenCodeConfigDir(), false);
+    assert.match(stderrBuf, /OPENCODE_CONFIG_DIR is not accessible/);
+    assert.match(stderrBuf, /does not exist/);
+  });
+
+  test('installSkills skips OpenCode install when OPENCODE_CONFIG_DIR is invalid', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const { installSkills } = require('../lib/installer');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'refacil-oc-invalid-'));
+    try {
+      process.env.OPENCODE_CONFIG_DIR = path.join(home, 'missing-opencode-root');
+      installSkills(path.resolve(__dirname, '..'), home, ['opencode']);
+      assert.ok(!fs.existsSync(path.join(globalOpenCodeDir(home), 'skills')));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test('returns false with stderr when OPENCODE_CONFIG_DIR is not writable', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const { installSkills } = require('../lib/installer');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'refacil-oc-ro-'));
+    const roDir = path.join(home, 'readonly-opencode');
+    fs.mkdirSync(roDir, { recursive: true });
+    if (process.platform === 'win32') {
+      const { spawnSync: spawn } = require('node:child_process');
+      spawn('attrib', ['+R', roDir], { shell: true });
+    } else {
+      fs.chmodSync(roDir, 0o500);
+    }
+    try {
+      process.env.OPENCODE_CONFIG_DIR = roDir;
+      const valid = validateOpenCodeConfigDir();
+      if (process.platform === 'win32' && valid) {
+        // Windows ACLs may still allow owner write; assert install skip via invalid path instead
+        process.env.OPENCODE_CONFIG_DIR = path.join(home, 'missing-opencode-root');
+        assert.equal(validateOpenCodeConfigDir(), false);
+        installSkills(path.resolve(__dirname, '..'), home, ['claude', 'opencode']);
+        assert.ok(fs.existsSync(path.join(globalClaudeDir(home), 'skills')));
+        assert.ok(!fs.existsSync(path.join(globalOpenCodeDir(home), 'skills')));
+        return;
+      }
+      assert.equal(valid, false);
+      assert.match(stderrBuf, /not writable/i);
+      installSkills(path.resolve(__dirname, '..'), home, ['claude', 'opencode']);
+      assert.ok(fs.existsSync(path.join(globalClaudeDir(home), 'skills')));
+      assert.ok(!fs.existsSync(path.join(globalOpenCodeDir(home), 'skills')));
+    } finally {
+      if (process.platform === 'win32') {
+        const { spawnSync: spawn } = require('node:child_process');
+        spawn('attrib', ['-R', roDir], { shell: true });
+      } else {
+        fs.chmodSync(roDir, 0o700);
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('legacyOpenCodeDirs', () => {
+  test('includes homeDir/.opencode', () => {
+    const dirs = legacyOpenCodeDirs('/home/testuser');
+    assert.ok(dirs.includes(path.join('/home/testuser', '.opencode')));
   });
 });
 

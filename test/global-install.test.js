@@ -156,8 +156,9 @@ describe('CA-09: installOpenCodePlugin writes to global dir', () => {
     const result = installOpenCodePlugin(homeDir);
     assert.equal(result, true);
 
-    const pluginPath = path.join(globalOpenCodeDir(homeDir), 'plugins', 'refacil-hooks.js');
-    assert.ok(fs.existsSync(pluginPath), 'plugin must exist in global opencode plugins dir');
+    const pluginsDir = path.join(globalOpenCodeDir(homeDir), 'plugins');
+    assert.ok(fs.existsSync(path.join(pluginsDir, 'refacil-hooks.js')), 'plugin must exist in global opencode plugins dir');
+    assert.ok(fs.existsSync(path.join(pluginsDir, 'refacil-check-review.js')), 'check-review helper must be co-installed');
   });
 
   test('plugin does NOT land in projectRoot/.opencode/plugins/', () => {
@@ -236,14 +237,14 @@ describe('CR-03: removeProjectLevelHooks strips SDD hooks from project files', (
     assert.ok(result.hooks?.myCustomHook?.some((h) => h.custom === true), 'custom hook must be preserved');
   });
 
-  test('removes SDD hooks from .cursor/hooks.json', () => {
+  test('removes SDD hooks from .cursor/hooks.json and preserves non-SDD hooks', () => {
     const cursorDir = path.join(projectRoot, '.cursor');
     fs.mkdirSync(cursorDir, { recursive: true });
     const hooksPath = path.join(cursorDir, 'hooks.json');
     const config = {
       version: 1,
       hooks: {
-        sessionStart: [{ _sdd: true, command: 'refacil-sdd-ai check-update' }],
+        sessionStart: [{ _sdd: true, command: 'refacil-sdd-ai check-update' }, { custom: true, command: 'my-hook' }],
         preToolUse: [{ _sdd_compact: true, command: 'compact-bash', matcher: 'Bash' }],
       },
     };
@@ -252,8 +253,9 @@ describe('CR-03: removeProjectLevelHooks strips SDD hooks from project files', (
     removeProjectLevelHooks(projectRoot);
 
     const result = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
-    assert.ok(!result.hooks?.sessionStart?.some((h) => h._sdd === true));
-    assert.ok(!result.hooks?.preToolUse?.some((h) => h._sdd_compact === true));
+    assert.ok(!result.hooks?.sessionStart?.some((h) => h._sdd === true), 'SDD hook must be removed');
+    assert.ok(!result.hooks?.preToolUse?.some((h) => h._sdd_compact === true), 'compact hook must be removed');
+    assert.ok(result.hooks?.sessionStart?.some((h) => h.custom === true), 'custom hook must be preserved');
   });
 
   test('is non-destructive when project files do not exist', () => {

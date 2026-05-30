@@ -23,6 +23,10 @@ const {
 const EXPECTED_VERSION_FILES = ['.claude/.sdd-version', '.cursor/.sdd-version', '.opencode/.sdd-version'];
 
 const { installOpenCodePlugin, uninstallOpenCodePlugin } = require('../lib/hooks');
+const { globalOpenCodeDir } = require('../lib/global-paths');
+
+/** Global OpenCode config dir when tmpDir is used as injectable homeDir. */
+const ocGlobal = (home) => globalOpenCodeDir(home);
 
 let tmpDir;
 
@@ -187,11 +191,11 @@ describe('installSkills → .opencode/skills/ (CA-01, CR-01)', () => {
 
     const count = installSkills(packageRoot, tmpDir);
     assert.ok(count > 0, 'debe instalar al menos una skill');
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'skills')), '.opencode/skills/ debe existir');
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'skills')), '.opencode/skills/ debe existir');
 
     // Verify byte-for-byte: compare a skill file between .claude and .opencode
     const claudeSkillFile = path.join(tmpDir, '.claude', 'skills', 'refacil-setup', 'SKILL.md');
-    const openCodeSkillFile = path.join(tmpDir, '.opencode', 'skills', 'refacil-setup', 'SKILL.md');
+    const openCodeSkillFile = path.join(ocGlobal(tmpDir), 'skills', 'refacil-setup', 'SKILL.md');
     if (fs.existsSync(claudeSkillFile) && fs.existsSync(openCodeSkillFile)) {
       const claudeContent = fs.readFileSync(claudeSkillFile);
       const openCodeContent = fs.readFileSync(openCodeSkillFile);
@@ -205,7 +209,7 @@ describe('installSkills → .opencode/skills/ (CA-01, CR-01)', () => {
 
     installSkills(packageRoot, tmpDir);
 
-    const skillsDir = path.join(tmpDir, '.opencode', 'skills');
+    const skillsDir = path.join(ocGlobal(tmpDir), 'skills');
     if (fs.existsSync(skillsDir)) {
       const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
       for (const entry of entries) {
@@ -224,7 +228,7 @@ describe('installSkills → .opencode/skills/ (CA-01, CR-01)', () => {
 
     // For every installed skill that exists in both .claude and .opencode, content must be identical
     const claudeSkillsDir = path.join(tmpDir, '.claude', 'skills');
-    const openCodeSkillsDir = path.join(tmpDir, '.opencode', 'skills');
+    const openCodeSkillsDir = path.join(ocGlobal(tmpDir), 'skills');
     if (!fs.existsSync(claudeSkillsDir) || !fs.existsSync(openCodeSkillsDir)) return;
 
     const claudeSkills = fs.readdirSync(claudeSkillsDir, { withFileTypes: true })
@@ -258,7 +262,7 @@ describe('installSkills → .opencode/skills/ (CA-01, CR-01)', () => {
     // .claude and .cursor should also have been updated (standard install)
     // But crucially, their content should NOT be changed by OpenCode install logic
     // The test verifies no side-effects: opencode install is additive only
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'skills')));
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'skills')));
   });
 });
 
@@ -273,7 +277,7 @@ describe('installAgents → .opencode/agents/ (CA-03)', () => {
 
     const count = installAgents(packageRoot, tmpDir);
     assert.ok(count >= 7, `debe instalar 7 agentes, instaló ${count}`);
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'agents')), '.opencode/agents/ debe existir');
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'agents')), '.opencode/agents/ debe existir');
   });
 
   test('agentes en .opencode/agents/ tienen mode: subagent y hidden: true', () => {
@@ -285,7 +289,7 @@ describe('installAgents → .opencode/agents/ (CA-03)', () => {
     installAgents(packageRoot, tmpDir);
 
     for (const name of AGENTS) {
-      const filePath = path.join(tmpDir, '.opencode', 'agents', `refacil-${name}.md`);
+      const filePath = path.join(ocGlobal(tmpDir), 'agents', `refacil-${name}.md`);
       assert.ok(fs.existsSync(filePath), `refacil-${name}.md debe existir en .opencode/agents/`);
       const content = fs.readFileSync(filePath, 'utf8');
       assert.match(content, /mode: subagent/, `refacil-${name}.md debe tener mode: subagent`);
@@ -302,7 +306,7 @@ describe('installAgents → .opencode/agents/ (CA-03)', () => {
     installAgents(packageRoot, tmpDir);
 
     for (const name of AGENTS) {
-      const filePath = path.join(tmpDir, '.opencode', 'agents', `refacil-${name}.md`);
+      const filePath = path.join(ocGlobal(tmpDir), 'agents', `refacil-${name}.md`);
       const content = fs.readFileSync(filePath, 'utf8');
       assert.match(content, /permission:/, `refacil-${name}.md debe tener bloque permission:`);
       assert.match(content, /webfetch: deny/, `refacil-${name}.md debe tener webfetch: deny`);
@@ -318,7 +322,7 @@ describe('installAgents → .opencode/agents/ (CA-03)', () => {
     installAgents(packageRoot, tmpDir);
 
     for (const name of AGENTS) {
-      const filePath = path.join(tmpDir, '.opencode', 'agents', `refacil-${name}.md`);
+      const filePath = path.join(ocGlobal(tmpDir), 'agents', `refacil-${name}.md`);
       const content = fs.readFileSync(filePath, 'utf8');
       assert.doesNotMatch(content, /^tools:/m, `refacil-${name}.md en OpenCode no debe tener tools:`);
     }
@@ -333,7 +337,7 @@ describe('installAgents → .opencode/agents/ (CA-03)', () => {
     installAgents(packageRoot, tmpDir);
 
     for (const name of AGENTS) {
-      const filePath = path.join(tmpDir, '.opencode', 'agents', `refacil-${name}.md`);
+      const filePath = path.join(ocGlobal(tmpDir), 'agents', `refacil-${name}.md`);
       const content = fs.readFileSync(filePath, 'utf8');
       assert.doesNotMatch(content, /^model:/m, `refacil-${name}.md en OpenCode no debe tener model:`);
     }
@@ -363,13 +367,18 @@ describe('installOpenCodePlugin — CA-04', () => {
   test('copia el plugin a .opencode/plugins/refacil-hooks.js', () => {
     const result = installOpenCodePlugin(tmpDir);
     assert.equal(result, true, 'debe retornar true en éxito');
-    const pluginPath = path.join(tmpDir, '.opencode', 'plugins', 'refacil-hooks.js');
-    assert.ok(fs.existsSync(pluginPath), 'refacil-hooks.js debe existir en .opencode/plugins/');
+    const pluginsDir = path.join(ocGlobal(tmpDir), 'plugins');
+    assert.ok(fs.existsSync(path.join(pluginsDir, 'refacil-hooks.js')), 'refacil-hooks.js debe existir');
+    assert.ok(
+      fs.existsSync(path.join(pluginsDir, 'refacil-check-review.js')),
+      'refacil-check-review.js debe copiarse junto al plugin',
+    );
+    assert.ok(fs.existsSync(path.join(pluginsDir, 'rules.js')), 'rules.js debe copiarse junto al plugin');
   });
 
   test('el plugin instalado contiene los 3 handlers esperados', () => {
     installOpenCodePlugin(tmpDir);
-    const pluginPath = path.join(tmpDir, '.opencode', 'plugins', 'refacil-hooks.js');
+    const pluginPath = path.join(ocGlobal(tmpDir), 'plugins', 'refacil-hooks.js');
     const content = fs.readFileSync(pluginPath, 'utf8');
     assert.match(content, /session\.created/, 'debe tener handler session.created');
     assert.match(content, /tui\.prompt\.append/, 'debe tener handler tui.prompt.append');
@@ -383,19 +392,20 @@ describe('installOpenCodePlugin — CA-04', () => {
   });
 
   test('crea .opencode/plugins/ si no existe', () => {
-    assert.ok(!fs.existsSync(path.join(tmpDir, '.opencode', 'plugins')));
+    assert.ok(!fs.existsSync(path.join(ocGlobal(tmpDir), 'plugins')));
     installOpenCodePlugin(tmpDir);
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'plugins')));
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'plugins')));
   });
 });
 
 describe('uninstallOpenCodePlugin — CA-04 cleanup', () => {
-  test('elimina refacil-hooks.js de .opencode/plugins/', () => {
+  test('elimina refacil-hooks.js y refacil-check-review.js de .opencode/plugins/', () => {
     installOpenCodePlugin(tmpDir);
     const result = uninstallOpenCodePlugin(tmpDir);
     assert.equal(result, true, 'debe retornar true cuando elimina el archivo');
-    const pluginPath = path.join(tmpDir, '.opencode', 'plugins', 'refacil-hooks.js');
-    assert.ok(!fs.existsSync(pluginPath), 'refacil-hooks.js no debe existir después de uninstall');
+    const pluginsDir = path.join(ocGlobal(tmpDir), 'plugins');
+    assert.ok(!fs.existsSync(path.join(pluginsDir, 'refacil-hooks.js')));
+    assert.ok(!fs.existsSync(path.join(pluginsDir, 'refacil-check-review.js')));
   });
 
   test('retorna false si el plugin no existe (idempotente)', () => {
@@ -466,30 +476,30 @@ describe('installOpenCodeJson — CA-09', () => {
 describe('removeOpenCodeArtifacts — CA-13', () => {
   test('elimina .opencode/skills/refacil-*/', () => {
     const packageRoot = path.resolve(__dirname, '..');
-    fs.mkdirSync(path.join(tmpDir, '.opencode'));
-    installSkills(packageRoot, tmpDir);
-
-    const skillsDir = path.join(tmpDir, '.opencode', 'skills');
-    assert.ok(fs.existsSync(skillsDir), 'directorio skills debe existir antes de clean');
+    const skillsDir = path.join(tmpDir, '.opencode', 'skills', 'refacil-setup');
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(packageRoot, 'skills', 'setup', 'SKILL.md'),
+      path.join(skillsDir, 'SKILL.md'),
+    );
 
     removeOpenCodeArtifacts(tmpDir);
 
-    // After clean, no refacil-* skill dirs should remain
-    if (fs.existsSync(skillsDir)) {
-      const remaining = fs.readdirSync(skillsDir).filter((n) => n.startsWith('refacil-'));
+    const projectSkills = path.join(tmpDir, '.opencode', 'skills');
+    if (fs.existsSync(projectSkills)) {
+      const remaining = fs.readdirSync(projectSkills).filter((n) => n.startsWith('refacil-'));
       assert.equal(remaining.length, 0, 'no deben quedar skills refacil-* después de clean');
     }
   });
 
   test('elimina .opencode/agents/refacil-*.md', () => {
     const packageRoot = path.resolve(__dirname, '..');
-    fs.mkdirSync(path.join(tmpDir, '.claude'));
-    fs.mkdirSync(path.join(tmpDir, '.cursor'));
-    fs.mkdirSync(path.join(tmpDir, '.opencode'));
-    installAgents(packageRoot, tmpDir);
-
     const agentsDir = path.join(tmpDir, '.opencode', 'agents');
-    assert.ok(fs.existsSync(agentsDir), 'directorio agents debe existir antes de clean');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(packageRoot, 'agents', 'implementer.md'),
+      path.join(agentsDir, 'refacil-implementer.md'),
+    );
 
     removeOpenCodeArtifacts(tmpDir);
 
@@ -500,13 +510,16 @@ describe('removeOpenCodeArtifacts — CA-13', () => {
   });
 
   test('elimina .opencode/plugins/refacil-hooks.js', () => {
-    installOpenCodePlugin(tmpDir);
-    const pluginPath = path.join(tmpDir, '.opencode', 'plugins', 'refacil-hooks.js');
-    assert.ok(fs.existsSync(pluginPath), 'plugin debe existir antes de clean');
+    const pluginsDir = path.join(tmpDir, '.opencode', 'plugins');
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(__dirname, '..', 'lib', 'opencode-plugin', 'index.js'),
+      path.join(pluginsDir, 'refacil-hooks.js'),
+    );
 
     removeOpenCodeArtifacts(tmpDir);
 
-    assert.ok(!fs.existsSync(pluginPath), 'plugin debe eliminarse en clean');
+    assert.ok(!fs.existsSync(path.join(pluginsDir, 'refacil-hooks.js')), 'plugin debe eliminarse en clean');
   });
 
   test('revierte clave $schema de opencode.json y elimina el archivo si queda vacío', () => {
@@ -621,7 +634,7 @@ describe('CR-03: instalación en repo limpio (sin carpetas IDE previas)', () => 
     // No .opencode, .claude, .cursor folders exist in tmpDir
     assert.doesNotThrow(() => installSkills(packageRoot, tmpDir));
     // Skills are installed to all IDEs
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'skills')));
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'skills')));
     assert.ok(fs.existsSync(path.join(tmpDir, '.claude', 'skills')));
     assert.ok(fs.existsSync(path.join(tmpDir, '.cursor', 'skills')));
   });
@@ -629,12 +642,12 @@ describe('CR-03: instalación en repo limpio (sin carpetas IDE previas)', () => 
   test('installAgents no falla en repo sin carpetas IDE previas', () => {
     const packageRoot = path.resolve(__dirname, '..');
     assert.doesNotThrow(() => installAgents(packageRoot, tmpDir));
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'agents')));
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'agents')));
   });
 
   test('installOpenCodePlugin no falla en repo sin .opencode previo', () => {
     assert.doesNotThrow(() => installOpenCodePlugin(tmpDir));
-    assert.ok(fs.existsSync(path.join(tmpDir, '.opencode', 'plugins', 'refacil-hooks.js')));
+    assert.ok(fs.existsSync(path.join(ocGlobal(tmpDir), 'plugins', 'refacil-hooks.js')));
   });
 
   test('installOpenCodeJson no falla en repo sin .opencode previo', () => {

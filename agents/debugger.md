@@ -53,6 +53,44 @@ If you prefer to continue here, provide:
 
 ---
 
+## CodeGraph integration (optional — investigation mode only)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available. In **mode=investigation** only:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper, or when you are in **mode=fix** (in fix mode the files to change are already known from the confirmed hypothesis — CodeGraph call-graph traversal adds no value and only burns tokens).
+
+---
+
 ## Investigation mode
 
 The main agent passes you: `mode: investigation` + bug `description`.
@@ -150,7 +188,9 @@ Each test must cover:
 
 Generate a descriptive folder name: `fix-[short-description]` (maximum 3-4 words kebab-case, e.g. `fix-session-timeout-redis`). **Do not use ticket IDs or branch name** — the name must be readable as input to `/refacil:explore`.
 
-Create `refacil-sdd/changes/<fix-name>/summary.md`:
+Resolve the absolute project root before writing: run `git rev-parse --show-toplevel` and store as `<projectRoot>`. Write `summary.md` to `<projectRoot>/refacil-sdd/changes/<fix-name>/summary.md` — never use a relative path with the Write tool in a monorepo.
+
+Create `<projectRoot>/refacil-sdd/changes/<fix-name>/summary.md`:
 
 ```markdown
 # Fix: [short description]

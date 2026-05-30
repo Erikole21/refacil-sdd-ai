@@ -6,7 +6,7 @@ user-invocable: false
 
 # SDD-AI Prerequisites
 
-Identical methodology in Claude Code (`.claude/skills/refacil-*`) and Cursor (`.cursor/skills/refacil-*`). Use the path of the open IDE.
+Identical methodology in all four supported IDEs: Claude Code (`~/.claude/skills/refacil-*`), Cursor (`~/.cursor/skills/refacil-*`), OpenCode (`~/.config/opencode/skills/refacil-*`), and Codex (`~/.codex/skills/refacil-*`). Skills install globally — not into the project repo. Use the path of the open IDE.
 
 Cross-cutting rules (states, branches, tests, output): `METHODOLOGY-CONTRACT.md` in this same folder.
 

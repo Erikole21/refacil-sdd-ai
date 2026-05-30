@@ -10,6 +10,33 @@ const os = require('node:os');
 const plugin = require('../lib/opencode-plugin/index.js');
 
 let tmpDir;
+/** @type {typeof import('node:child_process').execFileSync | null} */
+let originalExecFileSync = null;
+
+function stubCheckUpdateCli() {
+  const childProcess = require('node:child_process');
+  if (!originalExecFileSync) originalExecFileSync = childProcess.execFileSync;
+  const { methodologyMigrationPending } = require('../lib/methodology-migration-pending.js');
+
+  childProcess.execFileSync = function (file, args, opts) {
+    if (Array.isArray(args) && args.includes('check-update')) {
+      const projectRoot = opts && opts.cwd;
+      if (projectRoot) {
+        const flagPath = path.join(projectRoot, '.refacil-pending-update');
+        const mig = methodologyMigrationPending(projectRoot);
+        if (!mig.pending && fs.existsSync(flagPath)) fs.unlinkSync(flagPath);
+      }
+      return '';
+    }
+    return originalExecFileSync(file, args, opts);
+  };
+}
+
+function restoreCheckUpdateCliStub() {
+  if (originalExecFileSync) {
+    require('node:child_process').execFileSync = originalExecFileSync;
+  }
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-plugin-test-'));
@@ -18,10 +45,12 @@ beforeEach(() => {
   const linkPath = path.join(tmpDir, 'node_modules', 'refacil-sdd-ai');
   fs.mkdirSync(path.dirname(linkPath), { recursive: true });
   fs.symlinkSync(pkgRoot, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+  stubCheckUpdateCli();
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  restoreCheckUpdateCliStub();
+  fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
 });
 
 // ── Plugin structure ─────────────────────────────────────────────────────────
@@ -48,13 +77,24 @@ describe('plugin structure', () => {
 // ── session.created: check-update ───────────────────────────────────────────
 
 describe('session.created — check-update', () => {
-  test('escribe .refacil-pending-update cuando methodologyMigrationPending (AGENTS sin .agents/)', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
+  test('invoca bin/cli.js check-update con cwd del proyecto (paridad con otros IDEs)', async () => {
+    const childProcess = require('node:child_process');
+    const calls = [];
+    childProcess.execFileSync = function (file, args, opts) {
+      if (Array.isArray(args) && args.includes('check-update')) {
+        calls.push({ file, args, cwd: opts && opts.cwd });
+        return '';
+      }
+      return originalExecFileSync(file, args, opts);
+    };
 
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Project\n', 'utf8');
     await plugin.hooks['session.created']({ projectRoot: tmpDir });
 
-    const flagPath = path.join(tmpDir, '.refacil-pending-update');
-    assert.ok(fs.existsSync(flagPath), '.refacil-pending-update debe existir cuando hay migración pendiente');
+    const hit = calls.find((c) => Array.isArray(c.args) && c.args.includes('check-update'));
+    assert.ok(hit, 'debe ejecutar refacil-sdd-ai check-update via node bin/cli.js');
+    assert.equal(hit.cwd, tmpDir);
+    assert.match(hit.file, /node(\.exe)?$/i);
   });
 
   test('no escribe el flag cuando no hay migración pendiente', async () => {
@@ -145,10 +185,17 @@ describe('tui.prompt.append — notify-update', () => {
 // ── tool.execute.before: check-review ───────────────────────────────────────
 
 describe('tool.execute.before — check-review (git push)', () => {
-  test('bloquea git push cuando hay cambios activos sin .review-passed', async () => {
-    const changeDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'my-change');
+  function seedChangeAwaitingReview(changeDir) {
     fs.mkdirSync(changeDir, { recursive: true });
-    // No .review-passed file
+    fs.writeFileSync(
+      path.join(changeDir, 'tasks.md'),
+      '# Tasks\n\n- [x] Implementación iniciada\n- [ ] Pendiente\n',
+    );
+  }
+
+  test('bloquea git push cuando hay implementación iniciada sin .review-passed', async () => {
+    const changeDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'my-change');
+    seedChangeAwaitingReview(changeDir);
 
     await assert.rejects(
       plugin.hooks['tool.execute.before']({
@@ -157,6 +204,20 @@ describe('tool.execute.before — check-review (git push)', () => {
         projectRoot: tmpDir,
       }),
       /review pending|my-change/i,
+    );
+  });
+
+  test('no bloquea propuesta pura (tasks sin [x])', async () => {
+    const changeDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'my-proposal');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks\n\n- [ ] Solo pendiente\n');
+
+    await assert.doesNotReject(
+      plugin.hooks['tool.execute.before']({
+        tool: 'bash',
+        input: { command: 'git push origin main' },
+        projectRoot: tmpDir,
+      }),
     );
   });
 
@@ -294,6 +355,32 @@ describe('CR-02: plugin carga compact/rules.js o degrada gracefully', () => {
         projectRoot: tmpDir,
       }),
     );
+  });
+
+  test('CA-14: packaged rules.js resolves findRule without node_modules', async () => {
+    const pluginDir = path.join(tmpDir, 'isolated-plugins');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(__dirname, '../lib/opencode-plugin/index.js'),
+      path.join(pluginDir, 'refacil-hooks.js'),
+    );
+    fs.copyFileSync(
+      path.join(__dirname, '../lib/opencode-plugin/rules.js'),
+      path.join(pluginDir, 'rules.js'),
+    );
+
+    const isolatedPath = path.join(pluginDir, 'refacil-hooks.js');
+    delete require.cache[isolatedPath];
+    const isolated = require(isolatedPath);
+
+    const result = await isolated.hooks['tool.execute.before']({
+      tool: 'bash',
+      input: { command: 'git log' },
+      projectRoot: tmpDir,
+    });
+
+    assert.ok(result && result.command, 'git log must be rewritten via co-installed rules.js');
+    assert.match(result.command, /--oneline/);
   });
 
   test('CR-02: plugin degrada si tool no es bash — no actúa sobre herramientas read/write', async () => {

@@ -34,9 +34,9 @@ When the skill's trigger is met:
 
 1. **Verify active rooms**: run `refacil-sdd-ai bus rooms` to see the rooms and their members.
 2. **Evaluate preconditions**:
-   - **If there is an active room AND the repo you need to consult is already in it**: you can run `/refacil:ask @<repo-name> "..." --wait 180` directly. **Inform the user before sending** ("I'm going to ask @X in room Y: ..."). If the other repo is in `/refacil:attend` it responds automatically; if not, the dev goes to that window and runs `/refacil:inbox`.
+   - **If there is an active room AND the repo you need to consult is already in it**: you can run `/refacil:ask @[repo-name] "..." --wait 180` directly. **Inform the user before sending** ("I'm going to ask @X in room Y: ..."). If the other repo is in `/refacil:attend` it responds automatically; if not, the dev goes to that window and runs `/refacil:inbox`.
    - **If the `ask` is a change request** in the destination repo (not just an informational question), draft **concrete scope and criteria**; the destination session already operates under SDD-AI (joined with `/refacil:join`) and should channel the work with **`/refacil:propose`** there without you repeating the guide in the message. See `/refacil:ask` Step 1.5 and the "Room agreements" section below.
-   - **If there is no room, or the repo you need is not in any**: **do not create the room on your own**. Ask the user to run `/refacil:join <room-name>` in **this** session and also in the other repo's session (another IDE window). Both repos must be in the same room. Once confirmed, return to step 2.
+   - **If there is no room, or the repo you need is not in any**: **do not create the room on your own**. Ask the user to run `/refacil:join [room-name]` in **this** session and also in the other repo's session (another IDE window). Both repos must be in the same room. Once confirmed, return to step 2.
 
 If the user does not know the bus or does not know how to configure it, refer them to `/refacil:guide` (section "Bus between agents") before attempting the consultation.
 
@@ -53,24 +53,24 @@ Avoid vague requests like "check this integration". Prefer concrete contract que
 Recommended ask template (integration clarification):
 
 ```text
-integrationPoint: <endpoint/event/queue + direction>
-inputContract: <fields + validations>
-outputContract: <outputs/status/errors>
-compatibility: <version/constraints or unknown>
-sourceOfTruthRequest: <where to confirm in destination repo>
-question: <concrete doubt>
+integrationPoint: [endpoint/event/queue + direction]
+inputContract: [fields + validations]
+outputContract: [outputs/status/errors]
+compatibility: [version/constraints or unknown]
+sourceOfTruthRequest: [where to confirm in destination repo]
+question: [concrete doubt]
 ```
 
 Recommended reply template:
 
 ```text
-integrationPoint: <confirmed value>
-inputContract: <confirmed value>
-outputContract: <confirmed value>
-compatibility: <confirmed value or unknown>
-sourceOfTruth: <file/path/symbol in destination repo>
-confidence: <high|medium|low>
-openQuestions: <none | unresolved items>
+integrationPoint: [confirmed value]
+inputContract: [confirmed value]
+outputContract: [confirmed value]
+compatibility: [confirmed value or unknown]
+sourceOfTruth: [file/path/symbol in destination repo]
+confidence: [high|medium|low]
+openQuestions: [none | unresolved items]
 ```
 
 These templates support both first-pass clarification and retry loops.
@@ -97,9 +97,26 @@ If in the room (via `say` messages, `ask`/`reply` threads, or a mix) **agreement
 **Closing with the requester**: whoever **implements** here, upon finishing the agreed change (or reaching a clear state: done, PR, blocked, delegated), **must notify via bus** whoever originated the request or the room as appropriate:
 
 - If the work originated from an **`ask`** to this session and the context is still the same thread: **`/refacil:reply`** with the summary (the broker links `correlationId`).
-- If the agreement was via **`say`**, there are multiple interlocutors, or the same `ask` no longer applies: **`/refacil:ask @<requesting-session> "..."`** with the closing, or **`/refacil:say`** if the closing should be visible to the **entire** room.
+- If the agreement was via **`say`**, there are multiple interlocutors, or the same `ask` no longer applies: **`/refacil:ask @[requesting-session] "..."`** with the closing, or **`/refacil:say`** if the closing should be visible to the **entire** room.
 
 By default: **do not close silently** when another session was waiting for the result of the agreement.
+
+## Hard rule: `ask` + `reply` for contracts and agreements (never `say`)
+
+**Contract agreements, change requirements, bug reports, and any notification the recipient must process MUST be sent as `bus ask --to SESSION`, never as `bus say`.**
+
+Reasons:
+- `say` is a real-time broadcast. Sessions that join the room after the `say` was sent **will never see it** — it does not appear in the inbox.
+- `say` provides no delivery confirmation per recipient and cannot be part of a `correlationId` thread.
+- Only `ask` + `reply` guarantees that the message is stored in the recipient's inbox, linked by `correlationId`, and retrievable via `/refacil:inbox` at any time.
+
+Apply this rule to:
+- Any content the destination agent must act on (implement, review, confirm, fix)
+- Contract agreements between services
+- Close/done notifications for work items another session was waiting for
+- Bug reports that require work in another repo
+
+`say` remains valid for **optional real-time announcements** with no required response (e.g., "restarting the service", "finished my phase"). Do not use `say` as a substitute for `ask` when acknowledgment or action is required.
 
 ## What NOT to do
 

@@ -241,3 +241,96 @@ test('CA-15: .opencodeignore noop cuando ya tiene todas las entradas', () => {
     cleanup(dir);
   }
 });
+
+// CA-05: syncIgnoreFile returns noop when all base entries already present (including CRLF variant)
+
+test('CA-05: returns noop when all base entries are already present (LF)', () => {
+  const dir = makeTmpDir();
+  try {
+    // Create file with all base entries using LF
+    const { syncIgnoreFile } = require('../lib/ignore-files');
+    const filePath = require('path').join(dir, '.claudeignore');
+    const content = BASE_ENTRIES.join('\n') + '\n';
+    require('fs').writeFileSync(filePath, content);
+
+    const result = syncIgnoreFile(filePath);
+    assert.equal(result.status, 'noop', 'must return noop when all entries present (LF)');
+    assert.equal(result.added, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('CA-05: returns noop when file has CRLF line endings but all base entries present', () => {
+  const dir = makeTmpDir();
+  try {
+    const { syncIgnoreFile } = require('../lib/ignore-files');
+    const filePath = require('path').join(dir, '.claudeignore');
+    // Write same content but with CRLF (simulates Windows core.autocrlf=true)
+    const contentCRLF = BASE_ENTRIES.join('\r\n') + '\r\n';
+    require('fs').writeFileSync(filePath, contentCRLF);
+
+    const result = syncIgnoreFile(filePath);
+    assert.equal(result.status, 'noop', 'must return noop when all entries present (CRLF variant)');
+    assert.equal(result.added, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// syncIgnoreFile — 'updated' status branch
+test('syncIgnoreFile returns updated status when file exists but is missing some entries', () => {
+  const dir = makeTmpDir();
+  try {
+    const { syncIgnoreFile } = require('../lib/ignore-files');
+    const filePath = path.join(dir, '.claudeignore');
+    // Write a file with only one base entry — all others are missing
+    fs.writeFileSync(filePath, 'node_modules/\n');
+
+    const result = syncIgnoreFile(filePath);
+    assert.equal(result.status, 'updated', 'must return updated when entries were appended');
+    assert.ok(result.added > 0, 'added count must be greater than zero');
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// syncIgnoreFile — trailing-newline separator: file without trailing newline
+test('syncIgnoreFile handles file without trailing newline — no double blank line, no lost content', () => {
+  const dir = makeTmpDir();
+  try {
+    const { syncIgnoreFile } = require('../lib/ignore-files');
+    const filePath = path.join(dir, '.claudeignore');
+    // Write a file with ONE entry and NO trailing newline
+    fs.writeFileSync(filePath, 'node_modules/');
+
+    const result = syncIgnoreFile(filePath);
+    assert.equal(result.status, 'updated', 'must append missing entries');
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    // Original entry must still be present
+    assert.ok(content.includes('node_modules/'), 'original entry must be preserved');
+    // No double blank line at the seam (separator logic must add exactly one newline)
+    assert.ok(!content.includes('\n\n\n'), 'must not contain triple newline (double blank line)');
+    // File must end with a newline (well-formed)
+    assert.ok(content.endsWith('\n'), 'file must end with a newline after append');
+    // At least one other base entry must have been appended
+    assert.ok(content.includes('dist/'), 'dist/ must be appended as a missing entry');
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('CA-05: noop for .claudeignore and .cursorignore after first syncIgnoreFiles call', () => {
+  const dir = makeTmpDir();
+  try {
+    syncIgnoreFiles(dir);
+    const result2 = syncIgnoreFiles(dir);
+    assert.equal(result2.claude.status, 'noop');
+    assert.equal(result2.cursor.status, 'noop');
+    assert.equal(result2.claude.added, 0);
+    assert.equal(result2.cursor.added, 0);
+  } finally {
+    cleanup(dir);
+  }
+});

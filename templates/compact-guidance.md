@@ -41,5 +41,15 @@ Rules to minimize context consumption when working in this repository.
 - `docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"`.
 - `docker logs --tail 100` always; never full logs.
 
+**CodeGraph (when available)**
+When `codegraph_*` MCP tools are present in the session, prefer them over `Grep`, `Read`, and `Glob` for all structural queries:
+- Symbol lookup → `codegraph_search` before `Grep`
+- Tracing flows → `codegraph_callers` / `codegraph_callees`
+- Module context → `codegraph_context` (replaces reading multiple files)
+- Impact analysis → `codegraph_impact` before touching shared code
+- Fall back to native tools only for literal text search or when CodeGraph returns empty results.
+
+If the session context contains a `[refacil-sdd-ai] CodeGraph` message (CLI not installed or repo not indexed): relay it to the user in the first response and offer to run `/refacil:update`.
+
 **General rule**
 When in doubt between verbosity and conciseness, choose conciseness. The user can request detail on demand.

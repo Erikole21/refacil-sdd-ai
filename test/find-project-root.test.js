@@ -145,9 +145,11 @@ describe('findProjectRoot — fallback cuando no hay marcador', () => {
 
 describe('checkReview — usa findProjectRoot() desde subdirectorio (regresión)', () => {
   test('PR-07: checkReview bloquea git push aunque se invoque desde un subdir del repo', () => {
-    // Set up: root has .git + refacil-sdd/changes/my-feature (no .review-passed)
+    // Set up: root has .git + refacil-sdd/changes/my-feature (no .review-passed, task [x])
     fs.mkdirSync(path.join(tmpDir, '.git'));
-    fs.mkdirSync(path.join(tmpDir, 'refacil-sdd', 'changes', 'my-feature'), { recursive: true });
+    const changeDir = path.join(tmpDir, 'refacil-sdd', 'changes', 'my-feature');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks\n\n- [x] Implementación iniciada\n');
 
     // Invoke from a subdirectory
     const subDir = path.join(tmpDir, 'src');

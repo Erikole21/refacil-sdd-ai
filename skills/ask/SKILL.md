@@ -53,15 +53,48 @@ This framing increases response quality and reduces back-and-forth.
 When the question is about cross-repo integration contracts, draft the `--text` using this minimal template:
 
 ```text
-integrationPoint: <endpoint/event/queue + direction X->Y or Y->X>
-inputContract: <required/optional fields + key validation rules>
-outputContract: <expected output/status/errors>
-compatibility: <version/flags/env constraints or "unknown">
-sourceOfTruthRequest: <where to confirm in destination repo>
-question: <concrete doubt to resolve>
+integrationPoint: [endpoint/event/queue + direction X->Y or Y->X]
+inputContract: [required/optional fields + key validation rules]
+outputContract: [expected output/status/errors]
+compatibility: [version/flags/env constraints or "unknown"]
+sourceOfTruthRequest: [where to confirm in destination repo]
+question: [concrete doubt to resolve]
 ```
 
 If some fields are unknown, send `unknown` explicitly — do not invent values.
+
+## Safe bus text delivery
+
+**Use `--text` for simple messages** (no special characters, single-line):
+```bash
+refacil-sdd-ai bus ask --to [destination] --text "Simple question here"
+```
+
+**Do NOT use `<` or `>` inside `--text`** — shells may interpret them as redirection operators and truncate or discard the message.
+
+For messages containing `<`, `>`, `|`, newlines, or other special characters, use `--from-env`:
+
+**PowerShell (Windows)**:
+```powershell
+$env:BUS_TEXT = "integrationPoint: POST /api/pay -> processor`ninputContract: amount<number>, currency<string>"
+refacil-sdd-ai bus ask --to [destination] --from-env BUS_TEXT
+Remove-Item Env:BUS_TEXT
+```
+
+**bash (inline, preferred — automatic cleanup)**:
+```bash
+BUS_TEXT="integrationPoint: POST /api/pay -> processor
+inputContract: amount<number>" refacil-sdd-ai bus ask --to [destination] --from-env BUS_TEXT
+```
+
+**bash (export + unset alternative)**:
+```bash
+export BUS_TEXT="message with <special> chars"
+refacil-sdd-ai bus ask --to [destination] --from-env BUS_TEXT
+unset BUS_TEXT
+```
+
+> Note: the CLI cannot perform cleanup itself — it runs as a child process and cannot modify the parent shell's environment. Cleanup (`Remove-Item` / `unset`) is the responsibility of the invoking script or shell.
 
 ### Step 2: Decide whether to use `--wait`
 
@@ -69,7 +102,7 @@ Two modes:
 
 **Blocking mode (recommended when you need the response to continue)**:
 ```bash
-refacil-sdd-ai bus ask --to <destination> --text "<question>" --wait 180
+refacil-sdd-ai bus ask --to [destination] --text "[question]" --wait 180
 ```
 - The CLI blocks until it receives the response or the timeout passes (default suggested: 60-180s)
 - If the other side is in `/refacil:attend`, the response comes back automatically
@@ -78,7 +111,7 @@ refacil-sdd-ai bus ask --to <destination> --text "<question>" --wait 180
 
 **Fire-and-forget mode**:
 ```bash
-refacil-sdd-ai bus ask --to <destination> --text "<question>"
+refacil-sdd-ai bus ask --to [destination] --text "[question]"
 ```
 - Does not block; returns immediately after sending
 - Use it when you do not know if the other side is active or you do not need the response now
@@ -103,3 +136,5 @@ Use `Bash` with the chosen command.
 - If you **agreed** with another session that they will change their repo, they must use **`/refacil:propose`** there and **notify you via bus** when done; if they request changes from you, you do the same here. Full convention: `refacil-prereqs/BUS-CROSS-REPO.md`.
 - **`ask`s that are change requests** must be **substantive in scope** (Step 1.5): the recipient already uses the methodology; do not repeat the guide in the text. Do not use the bus to request opaque quick fixes when the impact requires SDD-AI.
 - For cross-repo contract clarifications, prefer Step 1.7 template. The same structure should also be expected in replies to ease retries.
+- **Cross-repo contracts, bug reports, and actionable content ALWAYS use `bus ask --to SESSION`**, never `bus say`. `say` is a broadcast-only announcement with no delivery guarantee for late-joining sessions and no inbox visibility. If the content is extensive, split it into numbered parts, each as an independent `ask`.
+- Do not use `<` or `>` inside `--text` arguments. Use `--from-env` instead (see "Safe bus text delivery" above).

@@ -164,7 +164,15 @@ Read the `artifactLanguage` field from the JSON output. Prepend the following in
 
 Fallback rule: if the command fails, produces invalid JSON, or returns an unknown/missing `artifactLanguage` value, use `english` and continue without interruption.
 
-#### Step 1b: Codebase exploration
+#### Step 1b: Project root resolution (MANDATORY — run before any file writes)
+
+Run: `git rev-parse --show-toplevel`
+
+Store the output as `<projectRoot>`. All Write tool calls MUST use this absolute path as the base: `<projectRoot>/refacil-sdd/changes/<changeName>/`
+
+**Never use relative paths with the Write tool** — in a monorepo they resolve relative to the agent's CWD, which may be a subdirectory, not the repo root. This is the leading cause of artifacts being written to the wrong location.
+
+#### Step 1c: Codebase exploration
 
 Before generating artifacts, explore the project so that `design.md` is realistic and not invented:
 - Read `AGENTS.md` to understand the current architecture.
@@ -175,7 +183,7 @@ Before generating artifacts, explore the project so that `design.md` is realisti
 
 Create the change directory by running: `refacil-sdd-ai sdd new-change <changeName>`
 
-Then generate the artifacts under `refacil-sdd/changes/<changeName>/` in this order:
+Then generate the artifacts under `<projectRoot>/refacil-sdd/changes/<changeName>/` (absolute path from Step 1b) in this order:
 
 1. `proposal.md` — objective, scope, justification of the change (see template).
 2. `specs.md` — specific and testable CA-XX and CR-XX criteria (see template). If the change is complex, you may create a `specs/**/*.md` tree instead of a single `specs.md`.
@@ -223,6 +231,42 @@ Your final response MUST have this structure:
 - Use the literal fence ` ```refacil-propose-result ` (not ` ```json `) so the wrapper can parse it unambiguously.
 - Emit it ALWAYS.
 - `specs` in `artefacts` must list the real paths of the generated specification files.
+
+## CodeGraph integration (optional)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper.
 
 ## Rules
 

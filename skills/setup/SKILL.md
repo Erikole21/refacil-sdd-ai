@@ -30,6 +30,58 @@ refacil-sdd-ai sdd 2>&1 || true
 
 Confirm that the subcommands `status`, `mark-reviewed`, `tasks-update`, and `archive` appear in the help.
 
+### Step 2b: CodeGraph early index (fire-and-forget)
+
+Start CodeGraph indexing **now**, before AGENTS.md is generated, so the call-graph is available or building while the rest of setup proceeds.
+
+Run:
+
+```bash
+refacil-sdd-ai sdd config --json
+```
+
+Parse the JSON. Check `codegraphMode` and its `sources.codegraphMode`:
+
+- **`disabled`**: skip this step entirely. Do not mention CodeGraph.
+
+- **`enabled`** (global or project setting):
+
+  - **CLI installed** (`installed: true`): fire indexing immediately in the background — **do not wait**:
+
+    ```bash
+    refacil-sdd-ai codegraph init
+    ```
+
+    Inform the user: "CodeGraph: indexing started in background. The `.codegraph/` directory will appear when complete (~30 s for small repos)."
+
+  - **CLI not installed** (`installed: false`): ask the user:
+
+    ```
+    CodeGraph is enabled but the CLI is not installed.
+    Do you want to install it now? This runs: npm install -g @colbymchenry/codegraph (~20 s)
+    (yes / no)
+    ```
+
+    - If **yes**: run `refacil-sdd-ai codegraph setup` and **show its full output**. This command installs the package and builds the index **synchronously** — it blocks until `.codegraph/` is fully ready. Wait for it to complete before continuing.
+    - If **no**: skip CodeGraph for now. Inform: "You can install it later by running `npm install -g @colbymchenry/codegraph` and then `/refacil:update`."
+
+- **`per-repo`**: ask the user once:
+
+  ```
+  Do you want to enable CodeGraph for this repo?
+  It indexes the call graph so exploratory sub-agents can query symbols instead of reading files (~71% token savings).
+  (yes / no)
+  ```
+
+  - If **yes**:
+    - **CLI installed**: run `refacil-sdd-ai codegraph init` in background, then persist the per-repo preference:
+      ```bash
+      refacil-sdd-ai sdd write-config --codegraph enabled
+      ```
+      Inform: "CodeGraph indexing started in background."
+    - **CLI not installed**: ask to install first (same flow as the `enabled` / not-installed branch above). If user installs: persist preference and init. If user skips: do not persist the enabled preference.
+  - If **no**: skip silently (per-repo decision, no global effect).
+
 ### Step 3: Create changes directory
 
 If `refacil-sdd/changes/` does not exist, create it:
@@ -156,7 +208,9 @@ Produce neutral placeholders (e.g. “Stack: unknown — see README / add manife
 | `/refacil:verify` | Verify implementation against the specs |
 | `/refacil:review` | Quality audit of the implemented code |
 | `/refacil:archive` | Archive the change and sync specs to the historical record |
-| `/refacil:up-code` | Update existing code to current patterns |
+| `/refacil:up-code` | Commit, push, and open PR for the current change |
+| `/refacil:autopilot` | Autonomous pipeline after approved propose: apply → test → verify → review → archive → up-code |
+| `/refacil:read-spec` | Listen to SDD spec Markdown in the browser with on-device TTS |
 | `/refacil:bug` | Create a fix proposal for a detected bug |
 | `/refacil:update` | Migrate documentation to the current methodology pattern |
 | `/refacil:join` | Join the cross-repo bus (first service setup) |
@@ -179,70 +233,46 @@ Produce neutral placeholders (e.g. “Stack: unknown — see README / add manife
 - The CLI (`refacil-sdd-ai check-update` on **SessionStart**, plus `update` / `init`) merges a block between **`<!-- refacil-sdd-ai:testing-policy:start -->`** and **`<!-- refacil-sdd-ai:testing-policy:end -->`** from the package template. If **`.agents/`** exists but **`testing.md`** does not, the file is **created** with a starter **Repo-specific commands** section **below** the markers (safe to edit; not overwritten on sync).
 - Put long-lived baseline/scoped command lines **outside** the markers (see template). Only the marked region is refreshed when the package updates.
 
-### Step 4b: Overwrite `CLAUDE.md` and `.cursorrules`
+### Step 4b–5: Per-repo IDE index files, ignores, and session markers (selected IDEs)
 
-Before writing IDE-specific files, detect installed IDE directories in repo root (`.claude/`, `.cursor/`, `.opencode/`).  
-Only create/update files for IDEs whose directory exists. Never create files for an IDE that is not present.
+**Source of truth for which IDEs apply to this repo** is the same as `refacil-sdd-ai init` / `update`: **`~/.refacil-sdd-ai/selected-ides.json`** (chosen during `init`). If that file is missing, the CLI falls back to detecting installed/global skill dirs — same heuristic as **`refacil-sdd-ai update`**.
 
-Rules:
-- If `.claude/` exists: overwrite `CLAUDE.md`.
-- If `.cursor/` exists: overwrite `.cursorrules`.
-- If both exist: overwrite both.
-- If neither exists: do not create either file; report that no supported IDE folder was detected and suggest running `refacil-sdd-ai init`.
+Do **not** infer IDE targets from `.claude/`, `.cursor/`, `.opencode/` folders in the repository; those dirs are optional and skills are normally **global**.
 
-When created, these files are thin indexes toward `AGENTS.md` and must not contain project detail.
+**Mandatory shell step** (repository root — same cwd rules as `init`):
 
-**`CLAUDE.md`** — minimal index, no project content:
-
-```
-# CLAUDE.md
-
-Full project context: see `AGENTS.md` (index) and `.agents/` (detail by area).
-If `AGENTS.md` does not exist, run `/refacil:setup`.
+```bash
+refacil-sdd-ai sync-repo-ide
 ```
 
-**`.cursorrules`** — identical content with header `# Cursor Rules`.
+This command writes or refreshes:
 
-All project detail, stack, rules and `refacil:*` commands live in `.agents/` and are indexed from `AGENTS.md`. Do not duplicate anything in CLAUDE.md or .cursorrules.
+- **`CLAUDE.md`** when Claude Code is in the IDE selection.
+- **`.cursorrules`** when Cursor is in the IDE selection (thin index toward `AGENTS.md`, same content policy as before).
+- **`.claudeignore`**, **`.cursorignore`**, **`.opencodeignore`** for the matching selected IDEs (`syncIgnoreFiles` — add missing base entries only; never overwrite custom lines).
+- **`compact-guidance`** in **`AGENTS.md`** and **`testing-policy`** block in **`.agents/testing.md`** when those files exist (same behavior as **`init`** / **`update`** tail).
 
-### Step 5: Context exclusion files
+Report the CLI stdout to the user (created vs up to date, compact-guidance, testing-policy). If it says no IDE selection was found and nothing could be inferred, instruct **`refacil-sdd-ai init`** first, then rerun **`sync-repo-ide`** from the repo root.
 
-Sync ignore files only for detected IDE directories:
-- `.claude/` → `.claudeignore`
-- `.cursor/` → `.cursorignore`
-- `.opencode/` → `.opencodeignore`
-
-Do not create `.claudeignore`, `.cursorignore`, or `.opencodeignore` if the matching IDE directory does not exist.
-
-If the files already exist, only missing entries are added — custom content is not overwritten.
-
-Inform the user of the result:
-- **Created**: the detected IDE ignore file(s) were created from scratch.
-- **Updated**: missing entries were added.
-- **No changes**: they already had all the entries.
-
-If the user wants to customize additional exclusions, they can edit them directly after setup.
+If the user wants extra exclusions beyond the base list, they may edit the ignore files after setup.
 
 ### Step 6: Verify skills
 
-- Refacil: verify `refacil-*` folders only under detected IDE directories:
-  - `.claude/` detected → check `.claude/skills/`
-  - `.cursor/` detected → check `.cursor/skills/`
-  - `.opencode/` detected → check `.opencode/skills/`
-  If missing for any detected IDE: run `refacil-sdd-ai init` and restart session.
+- Verify **`refacil-*`** folders under **global** IDE dirs (skills are installed per machine, not per repo): **`~/.claude/skills/`**, **`~/.cursor/skills/`**, **`~/.config/opencode/skills/`** (or `OPENCODE_CONFIG_DIR`), **`~/.codex/skills/`** — only for IDEs selected in **`refacil-sdd-ai init`**.
+  If missing: run **`refacil-sdd-ai init`** and restart your IDE session.
 - Verify `sdd` subcommand: `refacil-sdd-ai sdd 2>&1 || true` — must show subcommands `status`, `mark-reviewed`, `tasks-update`, `archive`.
 
 ### Step 7: Final summary
 
 ```
 === refacil:setup completed ===
- Node.js / refacil-sdd-ai / refacil-sdd/changes/ / branch config / AGENTS.md / IDE files (detected only) / ignore files (detected only) / skills OK
+ Node.js / refacil-sdd-ai / refacil-sdd/changes/ / branch config / AGENTS.md / sync-repo-ide (selected IDEs) / skills OK
 
- Restart Claude Code or Cursor session if this is the first skills installation.
+ Restart your IDE session (Claude Code, Cursor, OpenCode, or Codex) if this is the first skills installation.
  The next step is to review the available flow.
  Do you want me to continue with /refacil:guide?
 ```
 
 ## Rules
 
-- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 7, immediately invoke the **Skill tool** with `skill: "refacil:guide"`. Do not describe it in text or wait for the user to type `/refacil:guide`. (See `METHODOLOGY-CONTRACT.md §5`.)
+- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 7, immediately execute `/refacil:guide`. Do not describe it in text or wait for the user to type it. (See `METHODOLOGY-CONTRACT.md §5`.)

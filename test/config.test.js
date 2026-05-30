@@ -592,6 +592,57 @@ describe('cmdWriteConfig — sdd write-config subcommand', () => {
     assert.ok(after.includes('artifactLanguage: english'), `Expected english in updated global config: ${after}`);
   });
 
+  // Fix 3 (CA-05-cfg): --codegraph flag writes codegraphMode to project config
+  test('CA-codegraph-01: --codegraph enabled creates project config with codegraphMode: enabled', () => {
+    const result = runWriteConfig(tmpDir, ['--codegraph', 'enabled']);
+    assert.equal(result.status, 0, `Expected exit 0. stderr: ${result.stderr}`);
+    const projectConfigPath = path.join(tmpDir, 'refacil-sdd', 'config.yaml');
+    assert.ok(fs.existsSync(projectConfigPath), 'refacil-sdd/config.yaml should be created');
+    const content = fs.readFileSync(projectConfigPath, 'utf8');
+    assert.ok(content.includes('codegraphMode: enabled'), `Expected codegraphMode: enabled in: ${content}`);
+  });
+
+  test('CA-codegraph-02: --codegraph per-repo creates project config with codegraphMode: per-repo', () => {
+    const result = runWriteConfig(tmpDir, ['--codegraph', 'per-repo']);
+    assert.equal(result.status, 0, `Expected exit 0. stderr: ${result.stderr}`);
+    const projectConfigPath = path.join(tmpDir, 'refacil-sdd', 'config.yaml');
+    const content = fs.readFileSync(projectConfigPath, 'utf8');
+    assert.ok(content.includes('codegraphMode: per-repo'), `Expected codegraphMode: per-repo in: ${content}`);
+  });
+
+  test('CA-codegraph-03: --codegraph disabled creates project config with codegraphMode: disabled', () => {
+    const result = runWriteConfig(tmpDir, ['--codegraph', 'disabled']);
+    assert.equal(result.status, 0, `Expected exit 0. stderr: ${result.stderr}`);
+    const projectConfigPath = path.join(tmpDir, 'refacil-sdd', 'config.yaml');
+    const content = fs.readFileSync(projectConfigPath, 'utf8');
+    assert.ok(content.includes('codegraphMode: disabled'), `Expected codegraphMode: disabled in: ${content}`);
+  });
+
+  test('CR-codegraph-01: --codegraph with invalid mode value exits 1', () => {
+    const result = runWriteConfig(tmpDir, ['--codegraph', 'invalid-mode']);
+    assert.equal(result.status, 1, `Expected exit 1 for invalid codegraph mode. got ${result.status}`);
+    const combined = result.stdout + result.stderr;
+    assert.ok(
+      combined.includes('invalid-mode') || combined.includes('codegraph'),
+      `Expected error about invalid mode. output: ${combined}`,
+    );
+  });
+
+  test('CR-codegraph-02: --codegraph with empty string exits 1', () => {
+    const result = runWriteConfig(tmpDir, ['--codegraph', '   ']);
+    assert.equal(result.status, 1, `Expected exit 1 for empty codegraph value. got ${result.status}`);
+  });
+
+  test('CA-codegraph-04: --codegraph --global writes codegraphMode to global config', () => {
+    const result = runWriteConfig(tmpDir, ['--global', '--codegraph', 'per-repo']);
+    assert.equal(result.status, 0, `Expected exit 0. stderr: ${result.stderr}`);
+    assert.ok(fs.existsSync(globalConfigPath), 'Global config.yaml should be created');
+    const content = fs.readFileSync(globalConfigPath, 'utf8');
+    assert.ok(content.includes('codegraphMode: per-repo'), `Expected codegraphMode: per-repo in global config: ${content}`);
+    const projectConfigPath = path.join(tmpDir, 'refacil-sdd', 'config.yaml');
+    assert.ok(!fs.existsSync(projectConfigPath), 'Project config must NOT be created when --global is used');
+  });
+
   // CR-04: corrupt existing file handled gracefully
   test('CR-04: corrupt existing config.yaml is handled gracefully (treat as absent, warns stderr)', () => {
     // Write a corrupt file at the project config path (parseYaml is lenient — returns {} for unrecognised content)
@@ -787,14 +838,16 @@ describe('init non-TTY skip behaviour — CA-05', () => {
     fs.mkdirSync(path.join(tmpProject, 'refacil-sdd'), { recursive: true });
   });
 
+  // Silently ignore EBUSY: init may spawn background codegraph process that briefly holds tmpProject
   afterEach(() => {
-    fs.rmSync(tmpProject, { recursive: true, force: true });
-    fs.rmSync(tmpHome, { recursive: true, force: true });
+    try { fs.rmSync(tmpProject, { recursive: true, force: true }); } catch (_) {}
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch (_) {}
   });
 
-  // CA-05: when stdin is not a TTY (piped), init must not prompt for branch config
-  // and must NOT write a global config file as a result of the prompt
-  test('CA-05: init with --all and non-TTY stdin does not prompt and does not auto-write global branch config', () => {
+  // CA-05: when stdin is not a TTY (piped), init must not prompt for branch config.
+  // Note: after Fix 1 (CA-02-cfg), promptCodegraphMode writes codegraphMode:enabled in non-TTY mode,
+  // so the global config FILE may be created — but must NOT contain baseBranch or protectedBranches.
+  test('CA-05: init with --all and non-TTY stdin does not write branch config keys', () => {
     const globalConfigPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
 
     const result = spawnSync(node, [CLI, 'init', '--all'], {
@@ -810,18 +863,27 @@ describe('init non-TTY skip behaviour — CA-05', () => {
       timeout: 15000,
     });
 
-    // init may exit non-zero due to missing npm/git context, but the key assertion
-    // is that NO global config was written by the branch-config prompt path.
-    assert.ok(!fs.existsSync(globalConfigPath),
-      `Global config must NOT be written when init runs in non-TTY mode. File found at: ${globalConfigPath}`);
+    // After Fix 1, codegraphMode:enabled IS written by promptCodegraphMode in non-TTY mode.
+    // The key assertion is that branch config keys (baseBranch, protectedBranches) must NOT be written.
+    if (fs.existsSync(globalConfigPath)) {
+      const content = fs.readFileSync(globalConfigPath, 'utf8');
+      assert.ok(
+        !content.includes('baseBranch:'),
+        `baseBranch must not be written by branch-config prompt in non-TTY mode. Content: ${content}`,
+      );
+      assert.ok(
+        !content.includes('protectedBranches:'),
+        `protectedBranches must not be written by branch-config prompt in non-TTY mode. Content: ${content}`,
+      );
+    }
 
-    // Additionally, the process must not have timed out or hung waiting for input
+    // Process must not have timed out or hung waiting for input
     assert.ok(result.status !== null,
       'Process must terminate (not hang waiting for interactive input)');
   });
 
-  // CA-05: --yes flag also skips the branch-config prompt even in TTY context
-  test('CA-05: init --all --yes skips branch config prompt (no global config written)', () => {
+  // CA-05: --yes flag skips the branch-config prompt; codegraphMode:enabled is written (Fix 1)
+  test('CA-05: init --all --yes skips branch config prompt (no baseBranch/protectedBranches written)', () => {
     const globalConfigPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
 
     const result = spawnSync(node, [CLI, 'init', '--all', '--yes'], {
@@ -835,8 +897,18 @@ describe('init non-TTY skip behaviour — CA-05', () => {
       timeout: 15000,
     });
 
-    assert.ok(!fs.existsSync(globalConfigPath),
-      `Global config must NOT be written when --yes skips the prompt. File found at: ${globalConfigPath}`);
+    // Branch config keys must not be written even if the file exists (due to codegraphMode write)
+    if (fs.existsSync(globalConfigPath)) {
+      const content = fs.readFileSync(globalConfigPath, 'utf8');
+      assert.ok(
+        !content.includes('baseBranch:'),
+        `baseBranch must not be written when --yes skips the branch-config prompt. Content: ${content}`,
+      );
+      assert.ok(
+        !content.includes('protectedBranches:'),
+        `protectedBranches must not be written when --yes skips the prompt. Content: ${content}`,
+      );
+    }
     assert.ok(result.status !== null, 'Process must terminate');
   });
 });
@@ -1072,5 +1144,358 @@ describe('loadBranchConfigWithSources — artifactLanguage: invalid project valu
     assert.equal(result.artifactLanguage, 'spanish');
     assert.equal(result.sources.artifactLanguage, 'global');
     assert.ok(stderrOutput.includes('warning'), 'Expected warning for invalid project value');
+  });
+});
+
+// ── CodeGraph config — new exports (feat-codegraph-integration) ───────────────
+
+const {
+  extractCodegraphMode,
+  extractCodegraphSuggestState,
+  writeConfigValue,
+  CODEGRAPH_MODES,
+  DEFAULT_CODEGRAPH_MODE,
+} = require('../lib/config');
+
+// ── extractCodegraphMode — valid values ───────────────────────────────────────
+
+describe('extractCodegraphMode — valid values', () => {
+  test('returns "enabled" for valid value "enabled"', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: 'enabled' }, 'global'), 'enabled');
+  });
+
+  test('returns "per-repo" for valid value "per-repo"', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: 'per-repo' }, 'global'), 'per-repo');
+  });
+
+  test('returns "disabled" for valid value "disabled"', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: 'disabled' }, 'global'), 'disabled');
+  });
+
+  test('trims whitespace around a valid value', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: '  enabled  ' }, 'global'), 'enabled');
+  });
+
+  test('returns null when codegraphMode key is absent', () => {
+    assert.equal(extractCodegraphMode({}, 'global'), null);
+  });
+
+  test('CODEGRAPH_MODES contains enabled, per-repo, disabled', () => {
+    assert.ok(CODEGRAPH_MODES.includes('enabled'));
+    assert.ok(CODEGRAPH_MODES.includes('per-repo'));
+    assert.ok(CODEGRAPH_MODES.includes('disabled'));
+  });
+
+  test('DEFAULT_CODEGRAPH_MODE is "enabled"', () => {
+    assert.equal(DEFAULT_CODEGRAPH_MODE, 'enabled');
+  });
+});
+
+describe('extractCodegraphMode — invalid value emits warning and returns null (CA-04-cfg / CR-01-cfg)', () => {
+  let stderrOutput;
+  const originalWrite = process.stderr.write.bind(process.stderr);
+
+  beforeEach(() => {
+    stderrOutput = '';
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
+  test('returns null for an unknown codegraph mode value', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: 'invalid-mode' }, 'global'), null);
+  });
+
+  test('emits a warning for an unknown mode value', () => {
+    extractCodegraphMode({ codegraphMode: 'invalid-mode' }, 'global');
+    assert.ok(
+      stderrOutput.includes('warning') && stderrOutput.includes('invalid-mode'),
+      `Expected warning mentioning the invalid value. got: "${stderrOutput}"`,
+    );
+  });
+
+  test('returns null for an empty string', () => {
+    assert.equal(extractCodegraphMode({ codegraphMode: '' }, 'global'), null);
+  });
+
+  test('emits a warning for an empty string', () => {
+    extractCodegraphMode({ codegraphMode: '' }, 'global');
+    assert.ok(stderrOutput.includes('warning'), `Expected warning for empty codegraphMode. got: "${stderrOutput}"`);
+  });
+});
+
+// ── CA-03-cfg: loadBranchConfigWithSources returns codegraph fields ───────────
+
+describe('loadBranchConfigWithSources — codegraphMode from global config (CA-03-cfg)', () => {
+  let tmpDir;
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-cg-mode';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('CA-03-cfg: codegraphMode:"per-repo" in global config is returned with source "global"', () => {
+    writeYaml(GLOBAL_CONFIG_PATH, 'codegraphMode: per-repo\n');
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'per-repo');
+    assert.equal(result.sources.codegraphMode, 'global');
+  });
+
+  test('codegraphMode "enabled" in global config returns source "global"', () => {
+    writeYaml(GLOBAL_CONFIG_PATH, 'codegraphMode: enabled\n');
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'enabled');
+    assert.equal(result.sources.codegraphMode, 'global');
+  });
+
+  test('CR-02-cfg: codegraphMode is null and source is "default" when no config files exist', () => {
+    // No global config written — both absent
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, null);
+    assert.equal(result.sources.codegraphMode, 'default');
+  });
+
+  test('CA-04-cfg: invalid codegraphMode in global config → null returned, warning emitted', () => {
+    let stderrOutput = '';
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+    try {
+      writeYaml(GLOBAL_CONFIG_PATH, 'codegraphMode: totally-wrong\n');
+      const result = loadBranchConfigWithSources(tmpDir);
+      assert.equal(result.codegraphMode, null);
+      assert.ok(stderrOutput.includes('warning'), 'Expected warning for invalid codegraphMode');
+    } finally {
+      process.stderr.write = origWrite;
+    }
+  });
+});
+
+// ── extractCodegraphSuggestState ──────────────────────────────────────────────
+
+describe('extractCodegraphSuggestState — reads suggest-shown and suggest-snooze fields', () => {
+  test('returns {shown: null, snoozeUntil: null} when both keys are absent', () => {
+    const result = extractCodegraphSuggestState({}, 'global');
+    assert.deepEqual(result, { shown: null, snoozeUntil: null });
+  });
+
+  test('CA-07-hook: shown is true when codegraph-suggest-shown is "true"', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-shown': 'true' }, 'global');
+    assert.equal(result.shown, true);
+  });
+
+  test('shown is true when codegraph-suggest-shown is boolean true', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-shown': true }, 'global');
+    assert.equal(result.shown, true);
+  });
+
+  test('shown is false when codegraph-suggest-shown is "false"', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-shown': 'false' }, 'global');
+    assert.equal(result.shown, false);
+  });
+
+  test('shown is false when codegraph-suggest-shown is boolean false', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-shown': false }, 'global');
+    assert.equal(result.shown, false);
+  });
+
+  test('CA-04-hook: snoozeUntil is populated with ISO date string', () => {
+    const snoozeDate = '2026-06-01T00:00:00.000Z';
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-snooze': snoozeDate }, 'global');
+    assert.equal(result.snoozeUntil, snoozeDate);
+  });
+
+  test('snoozeUntil is null when codegraph-suggest-snooze is empty string', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-snooze': '' }, 'global');
+    assert.equal(result.snoozeUntil, null);
+  });
+
+  test('snoozeUntil is null when codegraph-suggest-snooze is whitespace-only', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-snooze': '   ' }, 'global');
+    assert.equal(result.snoozeUntil, null);
+  });
+
+  test('trims whitespace from snoozeUntil value', () => {
+    const result = extractCodegraphSuggestState({ 'codegraph-suggest-snooze': '  2026-06-01  ' }, 'global');
+    assert.equal(result.snoozeUntil, '2026-06-01');
+  });
+
+  test('returns both fields when both keys are present', () => {
+    const result = extractCodegraphSuggestState({
+      'codegraph-suggest-shown': 'true',
+      'codegraph-suggest-snooze': '2026-07-01',
+    }, 'global');
+    assert.equal(result.shown, true);
+    assert.equal(result.snoozeUntil, '2026-07-01');
+  });
+});
+
+// ── writeConfigValue ──────────────────────────────────────────────────────────
+
+describe('writeConfigValue — writes or updates a key in global config.yaml', () => {
+  let tmpHome;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'write-cfg-val-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  test('creates the config file and parent dir when they do not exist', () => {
+    writeConfigValue('codegraphMode', 'enabled', tmpHome);
+    const configPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
+    assert.ok(fs.existsSync(configPath), 'config.yaml must be created');
+    const content = fs.readFileSync(configPath, 'utf8');
+    assert.ok(content.includes('codegraphMode: enabled'), `Expected codegraphMode: enabled in: ${content}`);
+  });
+
+  test('CA-02-hook: writes codegraph-suggest-shown: true', () => {
+    writeConfigValue('codegraph-suggest-shown', 'true', tmpHome);
+    const configPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
+    const content = fs.readFileSync(configPath, 'utf8');
+    assert.ok(content.includes('codegraph-suggest-shown: true'), `Expected suggest-shown in: ${content}`);
+  });
+
+  test('CA-04-hook: writes codegraph-suggest-snooze with a future date', () => {
+    const futureDate = '2026-06-01';
+    writeConfigValue('codegraph-suggest-snooze', futureDate, tmpHome);
+    const configPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
+    const content = fs.readFileSync(configPath, 'utf8');
+    assert.ok(content.includes(`codegraph-suggest-snooze: ${futureDate}`), `Expected snooze date in: ${content}`);
+  });
+
+  test('updates an existing key without duplicating it', () => {
+    writeConfigValue('codegraphMode', 'enabled', tmpHome);
+    writeConfigValue('codegraphMode', 'disabled', tmpHome);
+    const configPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
+    const content = fs.readFileSync(configPath, 'utf8');
+    const occurrences = content.split('codegraphMode:').length - 1;
+    assert.equal(occurrences, 1, 'Key must appear exactly once after update');
+    assert.ok(content.includes('codegraphMode: disabled'), `Expected updated value in: ${content}`);
+  });
+
+  test('preserves unrelated keys when updating', () => {
+    writeConfigValue('baseBranch', 'main', tmpHome);
+    writeConfigValue('codegraphMode', 'per-repo', tmpHome);
+    const configPath = path.join(tmpHome, '.refacil-sdd-ai', 'config.yaml');
+    const content = fs.readFileSync(configPath, 'utf8');
+    assert.ok(content.includes('baseBranch: main'), `baseBranch must be preserved. Content: ${content}`);
+    assert.ok(content.includes('codegraphMode: per-repo'), `codegraphMode must be set. Content: ${content}`);
+  });
+
+  test('does not throw even with invalid homeDir (silent swallow)', () => {
+    assert.doesNotThrow(() => writeConfigValue('codegraphMode', 'enabled', '/nonexistent/path'));
+  });
+});
+
+// ── Fix 2: codegraphMode project → global cascade (CR-03-cfg) ────────────────
+
+describe('loadBranchConfigWithSources — codegraphMode: project overrides global (Fix 2 / CR-03-cfg)', () => {
+  let tmpDir;
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-cg-proj-override';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+    writeYaml(GLOBAL_CONFIG_PATH, 'codegraphMode: enabled\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('project codegraphMode per-repo overrides global codegraphMode enabled', () => {
+    writeYaml(
+      path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+      'codegraphMode: per-repo\n',
+    );
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'per-repo', 'Project codegraphMode must override global');
+    assert.equal(result.sources.codegraphMode, 'project', 'Source must be "project"');
+  });
+
+  test('project codegraphMode disabled overrides global codegraphMode enabled', () => {
+    writeYaml(
+      path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+      'codegraphMode: disabled\n',
+    );
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'disabled');
+    assert.equal(result.sources.codegraphMode, 'project');
+  });
+
+  test('global codegraphMode is used when project has no codegraphMode key', () => {
+    writeYaml(
+      path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+      'baseBranch: main\n',
+    );
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'enabled', 'Global codegraphMode must be used when project omits it');
+    assert.equal(result.sources.codegraphMode, 'global');
+  });
+
+  test('invalid project codegraphMode falls through to global', () => {
+    let stderrOutput = '';
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+    try {
+      writeYaml(
+        path.join(tmpDir, 'refacil-sdd', 'config.yaml'),
+        'codegraphMode: totally-invalid\n',
+      );
+      const result = loadBranchConfigWithSources(tmpDir);
+      assert.equal(result.codegraphMode, 'enabled', 'Invalid project value must fall through to global');
+      assert.equal(result.sources.codegraphMode, 'global');
+      assert.ok(stderrOutput.includes('warning'), 'Expected warning for invalid project codegraphMode');
+    } finally {
+      process.stderr.write = origWrite;
+    }
+  });
+});
+
+// ── CA-05-hook / CA-03-hook roundtrip via writeConfigValue + loadBranchConfigWithSources ──
+
+describe('writeConfigValue + loadBranchConfigWithSources — roundtrip for codegraphMode', () => {
+  const globalBak = GLOBAL_CONFIG_PATH + '.bak-cg-roundtrip';
+  const globalExisted = fs.existsSync(GLOBAL_CONFIG_PATH);
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = makeTmp();
+    if (globalExisted) fs.renameSync(GLOBAL_CONFIG_PATH, globalBak);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (fs.existsSync(GLOBAL_CONFIG_PATH)) fs.unlinkSync(GLOBAL_CONFIG_PATH);
+    if (globalExisted) fs.renameSync(globalBak, GLOBAL_CONFIG_PATH);
+  });
+
+  test('CA-02-hook: writing codegraphMode:enabled is readable by loadBranchConfigWithSources', () => {
+    writeConfigValue('codegraphMode', 'enabled', os.homedir());
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'enabled');
+    assert.equal(result.sources.codegraphMode, 'global');
+  });
+
+  test('CA-05-hook: writing codegraphMode:disabled is readable by loadBranchConfigWithSources', () => {
+    writeConfigValue('codegraphMode', 'disabled', os.homedir());
+    const result = loadBranchConfigWithSources(tmpDir);
+    assert.equal(result.codegraphMode, 'disabled');
+    assert.equal(result.sources.codegraphMode, 'global');
   });
 });

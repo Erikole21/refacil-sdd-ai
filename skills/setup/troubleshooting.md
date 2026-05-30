@@ -9,13 +9,35 @@ Consult this file **only** if a setup step fails. It is not part of the happy pa
 
 ## Skills `refacil-*` do not appear in the IDE
 
-- Run `refacil-sdd-ai init` at the repo root and **restart** the Claude Code or Cursor session.
-- If the skills are present in `.claude/skills/` but the IDE does not pick them up, restart the IDE (not just the session).
+- Run `refacil-sdd-ai init` at the repo root and **restart** the IDE session.
+- If the skills are present in the global IDE skills directory (e.g. `~/.claude/skills/`, `~/.cursor/skills/`, `~/.config/opencode/skills/`, `~/.codex/skills/`) but the IDE does not pick them up, restart the IDE (not just the session).
+
+## OpenCode hooks (global plugin)
+
+- OpenCode uses a **global** plugin at `~/.config/opencode/plugins/refacil-hooks.js` (not project `.opencode/plugins/`). Reinstall with `refacil-sdd-ai init` or `refacil-sdd-ai update` when OpenCode is selected, then restart OpenCode.
+
+## Codex hooks
+
+- Codex hooks merge into `~/.codex/config.toml` under `[hooks]` with `[features] codex_hooks = true`. Run `refacil-sdd-ai init` with Codex selected, then restart the Codex session.
 
 ## `refacil-sdd-ai init` creates files inside the wrong directory
 
 - Always run `refacil-sdd-ai init` from the **repository root** (the folder that owns the codebase — commonly where `package.json`, `go.mod`, `pyproject.toml`, or `Cargo.toml` lives), not from inside a subdirectory.
 - If you accidentally ran it from a subdirectory, delete the mistakenly created `.claude/`, `.cursor/`, `.claudeignore`, `.cursorignore`, `.cursorrules`, and `CLAUDE.md` from that subdirectory, then re-run from the correct location.
+
+## `/refacil:setup` did not create `CLAUDE.md`, `.cursorignore`, etc.
+
+- Those files come from **`refacil-sdd-ai sync-repo-ide`** (run by `/refacil:setup`). Execute it yourself from the **repository root**:
+
+  ```bash
+  refacil-sdd-ai sync-repo-ide
+  ```
+
+- Requires a prior **`refacil-sdd-ai init`** so **`~/.refacil-sdd-ai/selected-ides.json`** exists (or readable global skill dirs so the CLI can infer IDEs).
+
+## Wrong directory for `sync-repo-ide`
+
+- Same rule as **`init`** / **`update`**: cwd must be the **repository root**. Otherwise stubs and ignores are written next to the wrong folder.
 
 ## AGENTS.md is missing after init
 
@@ -29,7 +51,7 @@ Consult this file **only** if a setup step fails. It is not part of the happy pa
 
 ## Hook `check-update` not running at session start
 
-- Verify the hook is registered: check `.claude/settings.json` or `.cursor/settings.json` for a `hooks.SessionStart` entry that calls `refacil-sdd-ai check-update`.
+- Verify the hook is registered: Claude → `~/.claude/settings.json` (`SessionStart`); Cursor → `~/.cursor/hooks.json` (`sessionStart` when starting Agent chat — not duplicated on `workspaceOpen`). Both call `refacil-sdd-ai check-update`.
 - If missing, run `refacil-sdd-ai init` again (it is idempotent).
 
 ## `refacil-sdd/` not created after using SDD commands

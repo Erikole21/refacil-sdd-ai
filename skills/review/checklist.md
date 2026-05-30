@@ -74,8 +74,8 @@
 - Tests validate **behavior**, not implementation details (they do not break when refactoring)
 - Mocks are minimal and necessary — do not mock what can be tested directly
 - Tests are independent of each other (do not depend on execution order or shared state)
-- Coverage >= 80% on new files
-- Tests pass without errors (run the test command indicated in AGENTS.md)
+- Coverage >= 80% on new files (rely on **`/refacil:test`** phase + `memory.commandsRun` / `criteriaRun` when present — **do not** run the AGENTS.md baseline test command via Bash unless the user explicitly requested re-execution)
+- Tests pass: **PASS** if test phase succeeded per memory or static review of test files finds no obvious failures; **FAIL** only with evidence (missing tests, broken assertions visible in file, contradictions with spec)
 
 ## 7. Security
 - No hardcoded secrets (passwords, API keys, tokens, internal service URLs)

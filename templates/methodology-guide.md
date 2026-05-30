@@ -6,7 +6,7 @@ Skills are identical in `.claude/skills/refacil-*/` (Claude Code) and `.cursor/s
 
 | Command | Description |
 |---------|-------------|
-| `/refacil:setup` | Generate `AGENTS.md`, `.agents/`, `refacil-sdd/changes/`, and IDE index files for the project |
+| `/refacil:setup` | Generate `AGENTS.md`, `.agents/`, `refacil-sdd/changes/`, branch config; runs `refacil-sdd-ai sync-repo-ide` for stubs/ignores/markers (`CLAUDE.md`, `.cursorrules`, `*.ignore`, compact-guidance) from **selected IDEs** |
 | `/refacil:guide` | Interactive guide — which command to use |
 | `/refacil:explore` | Explore the codebase without changes |
 | `/refacil:propose` | Create a change proposal |
@@ -18,8 +18,13 @@ Skills are identical in `.claude/skills/refacil-*/` (Claude Code) and `.cursor/s
 | `/refacil:up-code` | Push code and create PR |
 | `/refacil:bug` | Guided bugfix flow |
 | `/refacil:update` | Apply pending **methodology** migrations (same engine as `notify-update`; e.g. `AGENTS.md` → `.agents/` index pattern) |
+| `/refacil:stats` | Show change progress, task status, review gate, and test commands from SDD artifacts |
+| `/refacil:read-spec` | Listen to a change's specs in the browser with on-device TTS |
+| `/refacil:autopilot` | Autonomous pipeline: chains `apply → test → verify → review → archive` in one invocation; `up-code` (push + PR) optional via pre-flight. Optional WhatsApp notification via Kapso |
 
 **Typical feature flow:** `setup` → `explore` (optional) → `propose` → `apply` → `test` → `verify` → `review` → `archive` → `up-code`.
+
+**Autonomous alternative:** after `propose` is approved, `/refacil:autopilot` chains `apply → test → verify → review → archive` (and optionally `up-code`) in a single invocation instead of running each step manually.
 
 **Bug flow:** `bug` replaces `propose`/`apply` for the fix path; then `test` / `review` / `archive` / `up-code` as appropriate (see skill `refacil:bug`).
 

@@ -33,16 +33,16 @@ With the selected `changeName`, run `refacil-sdd-ai sdd status <changeName> --js
 ```
 
 Validations:
-- If `artifacts.proposal` is `false` or `artifacts.tasks` is `false` or `artifacts.specs` is `false`:
+- Build `missingArtifacts` from every false value in `artifacts` (`proposal`, `design`, `tasks`, `specs`) and report the complete list. Do not stop at the first missing artifact.
+- If `ready.forApply` is `false` or `missingArtifacts.length > 0`:
   ```
   The change at refacil-sdd/changes/[name]/ is incomplete.
-  Missing: [list of artifacts with false]
+  Missing: [complete list of artifacts with false]
   Run: /refacil:propose to complete the artifacts before implementing.
   ```
   **Stop.**
-- If `ready.forApply` is `false` for the same reason: same message above.
 
-Note: `specs` is `true` if `specs.md` exists in the root **OR** at least one `.md` under the change's `specs/` folder.
+Note: `ready.forApply` is the contract source of truth and is `true` only when `proposal.md`, `design.md`, `tasks.md`, and a valid spec source exist. `specs` is `true` if non-empty `specs.md` exists in the root and/or at least one non-empty `.md` exists under `specs/**/*.md` (recursive; empty folders do not count). The same source set is used by `sdd status`, `sync-spec`, test/verify criteria extraction, and archive.
 
 **IMPORTANT**: This command NEVER generates SDD artifacts. If they do not exist, the user must use `/refacil:propose`.
 
@@ -52,57 +52,24 @@ Run `git branch --show-current` to get the current branch.
 
 If the current branch is already a working branch (`feature/*`, `fix/*`, `hotfix/*`, `refactor/*`, etc.), continue without interruption to Step 1.5.
 
-If the current branch is protected, execute the 3-gate protocol below strictly. Each gate is a hard stop — do not proceed to the next gate until the user has replied.
+If the current branch is protected, **read `METHODOLOGY-CONTRACT.md §4 — Protected branch policy`** before acting, then execute the gate protocol defined there. For this skill, Gates 1 and 2 are merged into a single interaction — propose and confirm in one message, wait for one reply.
 
----
+**See `METHODOLOGY-CONTRACT.md §4 — Protected branch policy`** for the complete gate protocol.
 
-**[GATE 1 — STOP AND WAIT: ask for task identifier]**
+Apply-specific annotations:
+- Default branch name: `feature/<changeName>` (e.g. `feature/my-change`). If the user provides a ticket or ID → `feature/<ID>`.
+- Stash handling: if uncommitted changes exist, inform the user in the same Gate 1+2 message and stash before creating the branch (`git stash push -m "auto-stash-refacil"`), restoring after (`git stash pop`).
+- If the user explicitly says "no" or "cancelar" → stop entirely. Do not create any branch.
 
-Ask the user exactly this question and then STOP. Do NOT run any git command. Do NOT propose a branch name. Do NOT continue to Gate 2 until the user replies:
+### Step 1.5a: Detect CodeGraph availability (non-blocking)
 
-> "What is the task number or identifier for this branch? (e.g. SEGINF-20, REF-123, or a short descriptive name)"
+Run: `refacil-sdd-ai codegraph status --json`
 
-If the user says they have no ID, note that and proceed to Gate 2 with `<ID> = none`.
+Parse the JSON output and set `codegraphAvailable`:
+- `true` if and only if the result contains `"installed": true` AND `"initialized": true`
+- `false` in all other cases (not installed, not initialized, command fails, invalid JSON, or any error)
 
----
-
-**[GATE 2 — STOP AND WAIT: propose branch name and ask for approval]**
-
-Only after receiving the user's reply to Gate 1:
-
-1. Verify clean working directory (`git status --porcelain`).
-2. If there are uncommitted changes, ask for approval to stash them (`git stash push -m "auto-stash-refacil"`). Do NOT stash without approval.
-3. Detect the effective configuration by running:
-   ```
-   refacil-sdd-ai sdd config --json
-   ```
-   Parse `baseBranch` and `protectedBranches` from the JSON output.
-   If the command fails or exits non-zero, fall back to:
-   - `protectedBranches` = [master, main]
-   - `baseBranch` = main (or master if main does not exist in the repo)
-4. Determine the base branch:
-   - Use the `baseBranch` value from the config (or the fallback).
-   - Only if that branch does not exist in the repo (new repo), use `main` or `master` as a temporary exception and recommend adopting the standard flow.
-5. Compose the branch name with `feature/` prefix:
-   - Feature: `feature/<ID>` (e.g. `feature/SEGINF-20`)
-   - Without ID: propose a short descriptive name (e.g. `feature/add-configurable-branches`)
-6. Present the proposed name and ask for approval. Then STOP. Do NOT run `git checkout` or `git switch`. Do NOT create the branch yet. Wait for the user's explicit confirmation:
-
-> "I'll create branch `<proposed-name>` from `<base-branch>`. Shall I proceed?"
-
----
-
-**[GATE 3 — execute only after explicit approval from Gate 2]**
-
-Only after the user explicitly confirms (e.g. "yes", "go", "ok", "proceed"):
-
-1. Switch to the base branch and update it (`git checkout <base>` + `git pull origin <base>`).
-2. Create the working branch (`git checkout -b <branch-name>`).
-3. If a stash was approved in Gate 2, restore it (`git stash pop`).
-
-If the user does not approve at Gate 2, stop entirely. Do not create any branch. Do not continue with implementation.
-
----
+**IMPORTANT**: if the index is not available, continue silently — do NOT gate, pause, ask, or wait. Apply does not interrupt for CodeGraph. Unlike `/refacil:propose`, `/refacil:explore`, or `/refacil:bug` (which benefit from graph traversal to discover scope), `/refacil:apply` typically follows a propose that already resolved the architecture. The implementer uses CodeGraph only for structural lookups during implementation, not for scope discovery.
 
 ### Step 1.5: Build structured briefing (reduces sub-agent tool calls)
 
@@ -114,19 +81,11 @@ Before invoking the sub-agent, extract the key context by reading the artifacts.
    - List of files to **modify** (full paths)
 3. **Tasks** — read `refacil-sdd/changes/<changeName>/tasks.md`. Extract the full numbered list.
 4. **`testScope`** — default **`scoped`**. Inspect `$ARGUMENTS` **and** the user message invoking this skill for explicit **whole-repo** regression (e.g. `full`, `all tests`, `whole suite`, `suite completa`, `suite completa del repo`). If present → **`testScope: full`**. Otherwise **`scoped`**.
-5. **`testCommand`** — read `refacil-prereqs/METHODOLOGY-CONTRACT.md` §3 for the baseline. If **`testScope: full`**, set **`testCommand`** to that baseline verbatim. If **`scoped`**, build a **narrowed** command per **§3.1** and the builder below (**never** silently run workspace-wide/monorepo root scripts that fan out to every package unless **every** scoped path warrants it — pick the smallest roots that cover **`scope.create` ∪ `scope.modify`**).
+5. **`testBaselineCommand`** — resolve the §3 baseline command language-agnostically at the **affected component root** (nearest ancestor of the files in `scope.create`/`scope.modify` with a stack manifest — per §3 component principle). Pass it verbatim. The implementer derives its own smoke command dynamically after editing — the BRIEFING must NOT include a precomputed `smokeTestCommand`. Do not pre-narrow the baseline here; narrowing is the implementer's responsibility.
+
+   > **Note — component-rooted, no pre-narrowing**: the wrapper resolves the baseline at the component root (not necessarily the monorepo root). The implementer uses `git diff`/`git status` after editing to discover the actual touched files, then calls `sdd test-scope` itself (which handles the `cd <component>` prefix automatically). This keeps the BRIEFING minimal and makes the smoke reflect what was *actually* changed in this run.
+
 6. **Architecture context** — read `.agents/stack.md` if it exists; if not, `.agents/architecture.md`; if neither exists, read only the first 60 lines of `AGENTS.md`. **Do not read the entire `.agents/` folder**.
-
-#### Scoped `testCommand` builder (apply — complements §3.1)
-
-1. **Baseline** — command from METHODOLOGY-CONTRACT §3 detection (respect `AGENTS.md` if it defines tests).
-2. **`T`** — sorted unique **`scope.create` ∪ `scope.modify`**. Omit entries that clearly do not justify a test run (`refacil-sdd/**/*.md` planning-only, etc.).
-3. If **`testScope: full`** or **`T`** is empty: **`testCommand` = baseline** (omit **`verificationWarning`** unless you document user intent).
-4. If **`scoped`** and **`T`** non-empty**:
-   - Prefer **narrowing instructions** documented in **`AGENTS.md`** or **`.agents/testing.md`** when present (follow them strictly).
-   - Otherwise use stack-aware suffixes/path filters documented for that toolchain (examples: **`pnpm exec jest`** / **`npm test`** with **`--`** + dirs or **`--testPathPattern`**, **`pytest`** paths, **`go test ./rel/...`**, **`cargo test -p member`**, **Gradle `-p`/`--tests`**, **Maven `-pl`/`-Dtest=`** — see METHODOLOGY-CONTRACT §3.1 **Scoped command patterns**).
-   - Pick the **smallest** dirs/modules covering all of **`T`**; include explicit test files from **`T`** when they exist.
-   - If narrowing is unsafe: **`testCommand` = baseline** and set **`verificationWarning: Scoped narrowing unavailable — falling back to baseline suite (high CPU/RAM)`**.
 
 Build the BRIEFING block that you will include literally in the delegation prompt:
 
@@ -137,14 +96,16 @@ objective: <objective in 1-2 sentences from the proposal>
 scope:
   create: [path/new-file-1.ts, path/new-file-2.ts, ...]
   modify: [path/existing-1.ts, path/existing-2.ts, ...]
-  doNotTouch: [refacil-sdd/, .claude/, .cursor/, AGENTS.md, package-lock.json]
+  doNotTouch: [refacil-sdd/, .claude/, .cursor/, .opencode/, AGENTS.md, package-lock.json]
+  # Note: also do not modify global Codex user dir (~/.codex/) — skills/agents/hooks are outside the repo.
 tasks:
   1. <task 1>
   2. <task 2>
   ...
 testScope: scoped | full
-testCommand: <exact shell command Step 5 — narrowed when scoped>
-verificationWarning: <optional — set when scoped fallback hits baseline suite>
+testBaselineCommand: <project baseline from METHODOLOGY-CONTRACT.md §3 — the implementer derives the smoke dynamically>
+codegraphAvailable: true | false
+verificationWarning: <optional — set if applicable>
 architectureContext: |
   <extract from stack.md or first lines of AGENTS.md>
 specsNote: <"specs.md" | "specs/**/*.md" | "both — report contradictions in issues">
@@ -176,6 +137,20 @@ This command merges into memory.yaml at the repo root using `findProjectRoot()` 
 
 If `result` is `"FAILED"`, skip and wait for user instructions.
 
+### Step 2.6: Log CodeGraph telemetry (silent)
+
+After parsing the `refacil-apply-result` block, run **once** (do not mention it to the user unless it fails):
+
+```bash
+refacil-sdd-ai compact log-codegraph-event --skill implementer --has-graph <codegraphAvailable> --tool-calls <N> --tokens <N>
+```
+
+- `--has-graph`: use the `codegraphAvailable` value detected in Step 1.5a (`true` or `false`).
+- `--tool-calls`: number of `codegraph_*` tool calls the sub-agent made (0 if it did not use the graph).
+- `--tokens`: conservative estimate of tokens saved (~800–1500 per useful tool call; 0 if no graph or no calls).
+
+Estimate `--tool-calls` and `--tokens` from the sub-agent's `<usage>` block using the same criteria as `explore/SKILL.md` Step 1.5. If the command fails, ignore it; it must not block the flow.
+
 ### Step 3: Present result and next step
 
 Show the user the **report** (everything before the `refacil-apply-result` block). Do not show the JSON block — it is internal metadata.
@@ -197,4 +172,4 @@ If the sub-agent returned `result: "PARTIAL"` or `"FAILED"`, present the `issues
 - **Always build the briefing (Step 1.5) before delegating** — it is the key piece that reduces the sub-agent cost.
 - **Always delegate implementation to the sub-agent**. Do not replicate implementation logic or SDD artifact-apply logic here.
 - Even when artifacts are Spanish, implementation output is English-only: created file/folder names, source code, test code, identifiers, and code comments.
-- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 3, immediately invoke the **Skill tool** with `skill: "refacil:test"`. Do not describe it in text or wait for the user to type `/refacil:test`. (See `METHODOLOGY-CONTRACT.md §5`.)
+- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) the continuity question in Step 3, immediately execute `/refacil:test`. Do not describe it in text or wait for the user to type it. (See `METHODOLOGY-CONTRACT.md §5`.)

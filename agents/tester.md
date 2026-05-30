@@ -91,16 +91,17 @@ The wrapper passes you `targetFile` and should pass `testCommand`, `testScope`, 
 4. Generate the test file following the project conventions.
 5. Run and fix until they pass (**Execution rules** below).
 
-### Execution rules (mandatory — §3.1)
+### Execution rules (mandatory — §3.1, component-bounded)
 
-Build the shell command actually executed; record it in JSON `tests.command`. Use **`AGENTS.md`**, **`METHODOLOGY-CONTRACT.md` §3**, and **one** project config file (`package.json`, `pytest.ini`, `go.mod`, `Cargo.toml`, `pom.xml`, `.csproj`, `build.gradle.kts`, etc.) so narrowing matches the stack.
+Build the shell command actually executed; record it in JSON `tests.command`.
 
-- **`testScope: full`** (on-demand): run the baseline `testCommand` unparsed by this agent (whole suite). Add coverage only if `runCoverage: true` — then use the project’s **normal / repo-wide** coverage behavior (heavy).
+**Component-bounded principle**: all execution is bounded to the affected component(s) — never the whole monorepo. The component is the nearest ancestor of each changed file that has a stack manifest (§3 component principle). The test command is resolved language-agnostically at the component root and **run from that component root** (`cd <component> && <command>`). For multi-component changes, run each component in sequence.
+
+- **`testScope: full`** (on-demand): run the full suite of each affected component by resolving the §3 baseline command at the component root (language-agnostic: `AGENTS.md` command > package-manager script > stack default). Run from that component dir. Do NOT run all monorepo packages. Add component-wide coverage only if `runCoverage: true`.
 - **`testScope: scoped` (default)**:
-  - **After** generating or updating test artifacts in this session, invoke the baseline runner with **explicit scope only**: file paths, package paths, `-Dtest=…`, `--tests …`, `-p` / `./pkg`, or whatever that tool documents — never rely on implicit full-suite discovery.
-  - Where the stack needs a sentinel (e.g. ` -- ` between script args and forwarded paths), follow that tool’s contract.
-  - If paths do not exist yet (edge case): use the narrowest filter the runner supports (pattern, substring, shard) derived from `filesToTest` or `targetFile`, then switch to explicit paths once files exist.
+  - Run `refacil-sdd-ai sdd test-scope --files <filesToTest-csv> --baseline "<testCommand>" [--stack <detectedStack if known from briefing>] --json` and use the resulting `testCommand` (already component-rooted via `cd` prefix when needed). If `fallback: true` → document `fallbackReason` in the report and run the component baseline only (not the full monorepo).
   - Do **not** run the baseline with zero narrowing unless falling back per §3.1 (and then warn).
+- **Re-run / fix-loop (pass-2)**: when iterating on failing tests, run **only the previously-failing test files** — not the whole component suite. Keeps fix loops fast and bounded (§3.1 rule 8).
 
 ### Coverage rules (mandatory — §3.1)
 
@@ -109,7 +110,7 @@ Build the shell command actually executed; record it in JSON `tests.command`. Us
 - **`runCoverage: true` + `testScope: full`**: after full-suite tests pass, run `coverageCommand` once as the project defines (typically global/report over the module).
 - If `coverageCommand` is null — report `coverage` N/A. If narrowing is unsupported by the tool — report N/A + WARNING (do not widen silently to repo-wide coverage while scoped).
 
-Working directory: module / service / repo root stated in project docs (`AGENTS.md` or config), not assumed.
+Working directory: the **component root** of the affected files (resolved language-agnostically per §3 — nearest ancestor with a stack manifest), not the monorepo root unless all changes are at the monorepo root.
 
 ## Generation rules
 
@@ -161,3 +162,39 @@ Working directory: module / service / repo root stated in project docs (`AGENTS.
 - Emit it ALWAYS.
 - `filesRead` lists the files read (for cost observability).
 - `issues` = `[]` if there are no problems. `coverage` = `null` if there is no script.
+
+## CodeGraph integration (optional)
+
+If `codegraphAvailable: true` was passed by the wrapper, CodeGraph MCP tools are available:
+- `codegraph_search <symbol>` — find definitions and usages of a symbol
+- `codegraph_callers <symbol>` — list all callers of a function or method
+- `codegraph_callees <symbol>` — list all functions called by a given function
+- `codegraph_context <file>` — get focused structural context for a task or area
+- `codegraph_impact <symbol>` — estimate the blast radius of a change
+- `codegraph_node <symbol>` — show a symbol's source, signature, or docstring
+- `codegraph_explore <query>` — deep survey of an unfamiliar module or topic (token-heavy; use once per investigation, not repeatedly)
+- `codegraph_files <path>` — list files indexed under a directory path
+
+**When to use CodeGraph — scope is unknown (fan-out is high):**
+- "Who calls X?" across a large or unfamiliar codebase
+- Blast radius / impact of changing a symbol
+- Disambiguating a symbol that appears in many files
+- Tracing a cross-module or cross-package flow you don't know yet
+
+**When to use Grep/Read directly — scope is already bounded:**
+- You already know the file(s) to look at (≤ 3–4 files)
+- Simple endpoint flow: one controller → one service method (1–2 Greps find everything)
+- Literal text search: log messages, config keys, string constants
+- Logic is inline in a single method — callees won't add information
+- Question asks about file content, not symbol relationships
+
+**Decision rule:** ask yourself — "Do I already know where to look?" If yes, start with Grep. If no (unknown codebase, cross-module, many candidates), start with CodeGraph.
+
+**Fallback:** if CodeGraph returns empty results for something that should have callers, fall back to Grep. Common reasons:
+- Framework-managed entry points (HTTP routes, queue consumers, scheduled jobs) — called by the runtime, not by code
+- DI / IoC containers: NestJS (`@Injectable`), Spring (`@Autowired`), Angular (`@Component`), Laravel, etc.
+- Dynamic dispatch: interfaces, abstract class overrides, plugin registries
+
+When falling back, use Grep with the symbol name and log: `[CodeGraph fallback: <reason>]`.
+
+**Do not use CodeGraph** when `codegraphAvailable: false` was passed by the wrapper.

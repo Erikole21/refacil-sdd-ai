@@ -51,7 +51,14 @@ In each repo where you want to use the methodology, open the IDE and run:
 /refacil:setup
 ```
 
-This generates `AGENTS.md` and the `.agents/` project index for that repo. It is the only step required per repo. Skills will prompt you to run it if it has not been done yet.
+`/refacil:setup`:
+
+1. Scaffolds **`AGENTS.md`**, **`.agents/`**, **`refacil-sdd/changes/`**, and project branch configuration (everything the methodology needs for **this codebase**).
+2. Runs **`refacil-sdd-ai sync-repo-ide`** from the **repository root** so per-repo stubs and excludes match **your IDE selection from `init`** (`~/.refacil-sdd-ai/selected-ides.json`): **`CLAUDE.md`**, **`.cursorrules`**, **`.claudeignore`**, **`.cursorignore`**, **`.opencodeignore`**, plus **`compact-guidance`** / **`testing-policy`** markers when **`AGENTS.md`** / **`.agents/testing.md`** exist (same logic as **`init`** / **`update`** for those files).
+
+You can run **`refacil-sdd-ai sync-repo-ide`** manually anytime from the repo root (e.g. after changing IDE selection). It does **not** reinstall global skills — only repo-local files driven by **`selected-ides.json`** (with the same fallback detection as **`update`** when that file is missing).
+
+Skills will prompt you to run `/refacil:setup` if the repo index is missing.
 
 ### Adding a new IDE to an existing installation
 
@@ -74,7 +81,7 @@ refacil-sdd-ai update
 
 `update` reads `~/.refacil-sdd-ai/selected-ides.json` (the selection saved during `init`) and only updates those IDEs — it never touches IDEs you did not select. You do not need to run `update` per repo; it operates on the global install.
 
-In Claude Code and Cursor the `check-update` hook (every session) syncs skills and `compact-guidance` automatically. It also cleans up any leftover project-level `refacil-*` artifacts from older installations and prints a message if it removes anything. In OpenCode the equivalent runs via the `session.created` handler of the embedded plugin. Only if a pending methodology migration is detected does the hook prompt `/refacil:update` — otherwise the user is not interrupted.
+In Claude Code, Cursor, Codex, and OpenCode the `check-update` hook (every session / `session.created`) runs `refacil-sdd-ai check-update`: syncs skills, `compact-guidance`, optional CodeGraph reindex, and cleans leftover project-level `refacil-*` artifacts. OpenCode invokes the same CLI via `node <package>/bin/cli.js check-update` from the global plugin. Only if a pending methodology migration is detected does `notify-update` prompt `/refacil:update` — otherwise the user is not interrupted.
 
 ### Uninstall
 
@@ -91,6 +98,7 @@ npm uninstall -g refacil-sdd-ai
 |---|---|
 | `refacil-sdd-ai init` | Install skills and hooks into global IDE user directories |
 | `refacil-sdd-ai update` | Re-copy skills and hooks to the latest version (global) |
+| `refacil-sdd-ai sync-repo-ide` | Repo-only: `CLAUDE.md`, `.cursorrules`, ignore files, compact-guidance + testing-policy markers — IDE list from `selected-ides.json` (same as `/refacil:setup` Step 4b–5). No global reinstall |
 | `refacil-sdd-ai migration-pending [--json]` | Same detection as hooks/`notify-update`; exit 1 if migration is pending; on exit 0 also deletes obsolete `.refacil-pending-update` (same as at the start of `check-update`) |
 | `refacil-sdd-ai clean` | Remove SDD-AI skills and hooks from global IDE user directories |
 | `refacil-sdd-ai help` | Show help |
@@ -112,7 +120,7 @@ Native CLI for **`refacil-sdd/`** (no separate OpenSpec skill layer). Used by sk
 |---|---|
 | `refacil-sdd-ai sdd new-change <name>` | Scaffold `proposal.md`, `design.md`, `tasks.md`, and specs under `refacil-sdd/changes/<name>/` |
 | `refacil-sdd-ai sdd list [--json]` | List active changes and review status |
-| `refacil-sdd-ai sdd status <name> [--json]` | Artifact and task status for one change |
+| `refacil-sdd-ai sdd status <name> [--json]` | Artifact and task status for one change. `ready.forApply` requires `proposal.md`, `design.md`, `tasks.md`, and specs from `specs.md` and/or recursive `specs/**/*.md` |
 | `refacil-sdd-ai sdd mark-reviewed <name>` | Write `.review-passed` (requires `--verdict`, `--summary`, counts) |
 | `refacil-sdd-ai sdd tasks-update <name>` | Mark a task done (`--task N --done`) |
 | `refacil-sdd-ai sdd archive <name>` | Move a regular change to `refacil-sdd/changes/archive/` |
@@ -121,6 +129,56 @@ Native CLI for **`refacil-sdd/`** (no separate OpenSpec skill layer). Used by sk
 | `refacil-sdd-ai sdd write-config [--global] [--base-branch <v>] [--protected-branches <csv>] [--artifact-language <lang>]` | Write or merge config into `refacil-sdd/config.yaml` (project) or `~/.refacil-sdd-ai/config.yaml` (`--global`). Performs a semantic no-op check — skips rewrite if values are already set. Directory is auto-created if absent. |
 
 Run **`refacil-sdd-ai help`** for the full list including `bus` and `compact` subcommands.
+
+### read-spec — on-device voice reading of SDD artifacts
+
+Opens a Markdown file or a complete SDD change folder in the browser and reads it aloud using **on-device TTS** (Supertonic/Kokoro via ONNX). No audio is sent to any server — synthesis runs entirely in the browser.
+
+```bash
+# Single file
+refacil-sdd-ai read-spec --file refacil-sdd/specs/my-feature/spec.md
+
+# Full SDD change folder (proposal + design + tasks + specs in a sidebar)
+refacil-sdd-ai read-spec --change my-feature-change
+
+# Archived change folder (path relative to refacil-sdd/changes/)
+refacil-sdd-ai read-spec --change archive/2026-05-20-my-feature-change
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--file <path>` | — | Single Markdown file (must be inside the project root) |
+| `--change <name>` | — | Load all SDD artifacts for a change folder; accepts `archive/<date>-<name>` paths too |
+| `--select <file.md>` | `proposal.md` | Pre-select a specific file when using `--change` |
+| `--lang <code>` | auto | TTS language (`es`, `en`, …). Defaults to `artifactLanguage` from the SDD meta comment |
+| `--voice <id>` | `M3` | Voice style: `M1`–`M5` or `F1`–`F5` |
+| `--speed <n>` | `1` | Playback speed 0.9–1.5 |
+
+#### File mode vs folder mode
+
+| | File mode (`--file`) | Folder mode (`--change`) |
+|---|---|---|
+| Sidebar | Hidden — content fills the full width | Shows all `.md` files in the change folder |
+| Navigation | Sections within the single file | Sections within the active file + **auto-advances to next file** when the last section finishes |
+| Use case | Quick review of a single spec | Full walkthrough: proposal → design → tasks → specs in one uninterrupted session |
+
+#### TTS pipeline
+
+- **Bilingual synthesis**: Spanish text is split into segments; English technical terms (`HTML`, `CSS`, `API`, camelCase identifiers, file paths, CLI flags, etc.) are synthesized with the English voice engine. Both segments are concatenated into a single audio buffer with no perceptible gap.
+- **Markdown rendering**: [`marked.js`](https://marked.js.org/) (loaded via CDN) renders headings, lists, tables, code blocks, bold/italic, and blockquotes as HTML. Falls back to plain text if the CDN is unavailable (offline mode).
+- **TTS text pipeline** — what gets stripped or transformed before synthesis:
+  - **Named code blocks** (` ```typescript `) → `"code block: typescript"` (source is not read aloud)
+  - **Unlabeled code blocks** (` ``` `) → body is read as plain text (diagrams, dependency graphs)
+  - **Markdown tables** → header label (`"tabla: ColA, ColB."`) followed by each data row as a comma list
+  - **HTML tag mentions** (e.g. `` `<table>` ``) → tag name only (`"table"`)
+  - **Arrows** (`→`) → `"arrow"`; emojis are removed
+  - **Paragraph lines** without terminal punctuation → period appended (natural TTS pause)
+  - **List items** → comma after each item except the last, which gets a period (enumeration rhythm)
+- **On-device**: models are downloaded from HuggingFace on the first visit and cached in the browser. Subsequent opens are instant. No data leaves the machine.
+
+#### Artifact Language
+
+`read-spec` detects the `artifactLanguage` meta comment at the top of the Markdown file (e.g. `<!-- refacil-sdd: artifactLanguage=spanish -->`) and sets the primary TTS language automatically. The `--lang` flag overrides it.
 
 ### Artifact Language
 
@@ -154,14 +212,24 @@ refacil-sdd-ai sdd config --json
 
 `refacil-sdd-ai init` also prompts for this preference and writes to the global config. Skip with `--yes` to keep the current value.
 
+### Kapso notifications (`kapso`)
+
+[Kapso](https://docs.kapso.ai/docs/whatsapp/send-messages/text) is a WhatsApp notification service. You'll need a Kapso account to obtain `KAPSO_API_KEY` and `KAPSO_PHONE_NUMBER_ID`.
+
+| Command | Description |
+|---|---|
+| `refacil-sdd-ai kapso setup` | Interactive setup of Kapso WhatsApp notification credentials (`~/.refacil-sdd-ai/kapso.env`) |
+
 ### Command rewrite control (`compact-bash`)
 
 | Command | Description |
 |---|---|
-| `refacil-sdd-ai compact stats` | Statistics (hook + already-compact) + estimated tokens and USD |
+| `refacil-sdd-ai compact stats` | Statistics (compact-bash hook + CodeGraph) and estimated tokens/USD |
+| `refacil-sdd-ai compact log-codegraph-event` | Log a sub-agent CodeGraph session (`--skill`, `--has-graph`, `--tool-calls`, `--tokens`) |
 | `refacil-sdd-ai compact enable` | Re-enable rewriting |
 | `refacil-sdd-ai compact disable` | Disable rewriting without uninstalling |
 | `refacil-sdd-ai compact clear-log` | Clear `~/.refacil-sdd-ai/compact.log` |
+| `refacil-sdd-ai compact codegraph-clear-log` | Clear `~/.refacil-sdd-ai/codegraph.log` |
 
 ### Agent bus (`bus`)
 
@@ -184,7 +252,7 @@ refacil-sdd-ai sdd config --json
 
 > The `join/leave/say/ask/reply/attend/inbox` subcommands also exist as **IDE skills** (`/refacil:join`, etc.). In most cases use the skills; the CLI commands are for scripting or debugging.
 >
-> **Cross-repo coordination** (ask requests, room agreements, `/refacil:propose`, closing to the requester): after `init`, the file **`BUS-CROSS-REPO.md`** is available in `~/.claude/skills/refacil-prereqs/` and `~/.cursor/skills/refacil-prereqs/`.
+> **Cross-repo coordination** (ask requests, room agreements, `/refacil:propose`, closing to the requester): after `init`, the file **`BUS-CROSS-REPO.md`** is available in each selected IDE's global `refacil-prereqs` skill folder — e.g. `~/.claude/skills/refacil-prereqs/`, `~/.cursor/skills/refacil-prereqs/`, `~/.config/opencode/skills/refacil-prereqs/`, `~/.codex/skills/refacil-prereqs/` (or your `OPENCODE_CONFIG_DIR` skills path).
 
 ---
 
@@ -196,7 +264,7 @@ All invoked as `/refacil:<name>` in Claude Code, Cursor, OpenCode, or Codex.
 
 | Skill | Usage |
 |---|---|
-| `/refacil:setup` | Generate AGENTS.md and the `.agents/` project index |
+| `/refacil:setup` | Generate AGENTS.md, `.agents/`, `refacil-sdd/changes/`, branch config; **`sync-repo-ide`** (stubs, ignores, session markers for IDEs chosen in **`init`**) |
 | `/refacil:guide` | Interactive guide on which command to use |
 | `/refacil:explore` | Explore the codebase without modifying anything |
 | `/refacil:propose` | Create a change proposal: proposal + specs + design + tasks |
@@ -208,6 +276,9 @@ All invoked as `/refacil:<name>` in Claude Code, Cursor, OpenCode, or Codex.
 | `/refacil:up-code` | Commit + push + PR (runs review if missing) |
 | `/refacil:bug` | Full bugfix flow with regression tests |
 | `/refacil:update` | Detect and apply pending methodology migrations to the current repo |
+| `/refacil:stats` | Show change progress, task status, review gate, and test commands from SDD artifacts |
+| `/refacil:read-spec` | Listen to change specs in the browser with on-device TTS |
+| `/refacil:autopilot` | Autonomous pipeline: chains apply → test → verify → review → archive in one invocation; up-code (push + PR) is optional and configured in pre-flight. Optional WhatsApp notification via `~/.refacil-sdd-ai/kapso.env` |
 
 ### Automatic sub-agents (v3.0.0+)
 
@@ -216,9 +287,9 @@ Some skills delegate their heavy work to **sub-agents** that run in isolated con
 | Skill | Sub-agent | Role | Can write |
 |---|---|---|---|
 | `/refacil:explore` | `refacil-investigator` | Reads codebase, enriches with AGENTS.md, queries cross-repo bus | No |
-| `/refacil:verify` | `refacil-validator` | Runs tests + compares against spec, returns prioritized issues | No |
+| `/refacil:verify` | `refacil-validator` | Validates CA/CR vs spec; runs tests only when `testExecution: full` or smoke after fixes (§3.2) | No |
 | `/refacil:review` | `refacil-auditor` | Evaluates changes against the quality checklist | No |
-| `/refacil:test` | `refacil-tester` | Detects stack, generates tests covering CA/CR, runs and fixes | Yes (test files) |
+| `/refacil:test` | `refacil-tester` | **Canonical test phase**: generates tests, runs scoped suite + coverage, writes `memory.commandsRun` | Yes (test files) |
 | `/refacil:apply` | `refacil-implementer` | Reads SDD artifacts and implements all change tasks | Yes (source code) |
 | `/refacil:bug` | `refacil-debugger` | `investigation` mode: analyzes root cause without modifying anything. `fix` mode: implements the fix, generates regression tests, creates `summary.md` | Only in fix mode |
 | `/refacil:propose` | `refacil-proposer` | Explores the codebase and generates proposal, specs, design, and tasks | Yes (SDD artifacts) |
@@ -230,6 +301,15 @@ Some skills delegate their heavy work to **sub-agents** that run in isolated con
 **Multi-platform**: `.claude/agents/refacil-*.md` uses `tools:` (granular allowlist). `.cursor/agents/refacil-*.md` is auto-generated: `readonly: true` for agents without `Edit`/`Write`, `readonly: false` for those that have them; always `model: inherit`. `.opencode/agents/refacil-*.md` is auto-generated via `transformFrontmatterForOpenCode()`: converts `tools:` to a `permission:` block (`edit: allow/deny`, `bash: allow/deny`, `webfetch: deny`), adds `mode: subagent`, adds `hidden: true` for internal agents, and removes `model:`. `.codex/agents/refacil-*.toml` is auto-generated via `convertAgentToToml()`: extracts `name` and `description` from the YAML frontmatter and places the Markdown body in `developer_instructions = """..."""`. The installer transforms the frontmatter automatically for all four IDEs.
 
 **Two-pass `refacil:bug` flow**: the wrapper first invokes the sub-agent in `investigation` mode (writes nothing) → the user confirms the hypothesis and approves the fix → the wrapper validates the working branch → invokes the sub-agent in `fix` mode to implement.
+
+### Component-bounded testing (monorepos)
+
+In a monorepo, **no phase ever runs the entire monorepo's test suite** — each phase scopes execution to the **affected component(s)** only. This `component-bounded` principle is defined in `skills/prereqs/METHODOLOGY-CONTRACT.md` (§3 / §3.1 / §3.2).
+
+- **Scope resolution**: `test-scope` resolves every changed file to its owning component (`findModuleRoot` → `affectedComponents`) and runs that component's real test command from its own root (`cd <component> && …`), language-agnostic (Node, Python, Go, Rust, Java/Maven/Gradle, C#/dotnet…). Test files passed directly are recognized as their own scope.
+- **`/refacil:apply` never runs the full suite**: it runs a smoke check of what it modified, or skips and delegates the full run to `/refacil:test` (overrides the §3.1 "unreliable scope → run baseline" clause).
+- **`/refacil:test` is the only phase that runs a full suite** — and only for the affected component. A re-run covers just the previously failing tests, not the whole suite again.
+- **`/refacil:verify`, `/refacil:review`, and `/refacil:archive` do not re-execute tests**: they consume the evidence recorded by `/refacil:test` in `memory.yaml`. In autopilot, missing/stale evidence aborts instead of silently widening the test scope.
 
 ### Agent bus
 
@@ -252,7 +332,14 @@ Quick rule for choosing the entry command:
 - New feature or behavior change → `/refacil:propose`
 - Functional bug or production error → `/refacil:bug`
 
-From there, the full cycle is:
+**Optional token-reduction layer**: if `.codegraph/` exists at the repo root (created by
+`refacil-sdd-ai codegraph init` via `/refacil:setup` when `codegraphMode` is `enabled`),
+exploratory sub-agents use CodeGraph symbol queries instead of file reads, reducing token
+consumption ~71% in the `/refacil:explore`, `/refacil:propose`, and `/refacil:bug`
+(investigation phase) flows. This layer is transparent — skill invocation and output contracts
+are unchanged.
+
+From there, the full cycle is (after `/refacil:propose` you choose step-by-step or autonomous — see note below):
 
 ```
 ┌───────────────────────────┐
@@ -272,45 +359,92 @@ From there, the full cycle is:
    design +    summary.md)
    tasks)        │
          │       │
+         │ ┌─────────────────────────────┐
+         ├─┤ read-spec --change <name>   │ ← optional
+         │ │ (listen to proposal, specs, │
+         │ │  design & tasks by voice;   │
+         │ │  auto-advances file by file)│
+         │ └─────────────────────────────┘
          ▼       │
-  /refacil:     │
-  apply         │
-         │       │
-         ▼       │
-  /refacil:     │
-  test          │
-         │       │
-         ▼       │
-  /refacil:     │
-  verify        │
-  (max 2 rounds │
-   autofix)     │
-         │       │
-         └───┬───┘
-             ▼
-     /refacil:review
-     (generates .review-passed)
-             ▼
-    /refacil:archive
-    (feature: moves to archive/ + syncs specs
-     bug: fix-*/spec.md + review.yaml)
-             ▼
-    /refacil:up-code
-    (checks review +
-     commit + push + PR)
-             ▼
-         PR created
+  ┌──────────────┴──────────┐
+  │ Continue implementation?│
+  └────┬──────────────┬─────┘
+       │              │
+  A: step-by-step     │ B: autonomous
+       │              │
+       ▼              ▼
+  /refacil:      /refacil:
+  apply          autopilot ──────────────────────────────┐
+       │         (internally chains:                      │
+       ▼          apply → test → verify → review          │
+  /refacil:       → archive → [up-code, optional])        │
+  test                │                                   │
+       │              │ on finish:                        │
+       ▼              │ WhatsApp via Kapso                │
+  /refacil:           │ (if configured)                   │
+  verify              ▼                                   │
+  (CA/CR; tests  PR created or archive-only ◄─────────── ┘
+   delegated to  (depends on pre-flight up-code choice)
+   delegated to
+   test phase;
+   max 2 autofix
+   smoke only)
+       │
+       ▼
+  /refacil:review
+  (generates .review-passed)
+       │
+       ▼
+  /refacil:archive
+  (feature: moves to archive/ + syncs specs
+   bug: fix-*/spec.md + review.yaml)
+       │
+       ▼
+  /refacil:up-code
+  (checks review +
+   commit + push + PR)
+       │
+       ▼
+  PR created
 ```
+
+> **After `/refacil:propose` is approved**, two continuation options are offered:
+> - **`/refacil:apply`** (option A) — step-by-step: each phase (apply → test → verify) pauses for your confirmation.
+> - **`/refacil:autopilot`** (option B) — autonomous: chains apply → test → verify → review → archive in one invocation. During pre-flight you decide whether to include up-code (push + PR) or end the cycle at archive. The pipeline adapts: with up-code it ends at a PR; without up-code it ends at archive. Optional WhatsApp notification via Kapso in both cases (configure with `refacil-sdd-ai kapso setup`). Path B is fully independent — it handles review, archive, and optionally up-code internally without merging into path A.
+>
+> **`read-spec --change <name>`** is an optional review step between propose and the implementation choice. It opens the change folder in the browser and reads proposal, design, tasks, and specs aloud in order, auto-advancing between files. Use it to absorb the scope of a change hands-free before committing to implementation.
+
+---
+
+## Autonomous Mode
+
+Run the full post-proposal SDD cycle without manual intervention using `/refacil:autopilot`. After `/refacil:propose` is approved, a single command chains **apply → test → verify → review → archive** and, depending on your pre-flight choice, optionally continues with **up-code** (commit + push + PR). You decide in the pre-flight whether to include up-code or end the cycle at archive. The pipeline adapts accordingly and always sends the Kapso notification and prints the terminal summary when it finishes.
+
+### One-time Kapso setup (optional — required for WhatsApp notifications)
+
+```bash
+refacil-sdd-ai kapso setup
+```
+
+This prompts for `KAPSO_API_KEY`, `KAPSO_PHONE_NUMBER_ID`, and `NOTIFY_PHONE` (E.164 format), then writes `~/.refacil-sdd-ai/kapso.env` with `chmod 600`. You only need to run this once. Autopilot works without it — you just won't receive a WhatsApp notification.
+
+> **Getting your Kapso credentials**: see [Kapso docs → Introduction](https://docs.kapso.ai/docs/whatsapp/send-messages/text) for how to create an account, get your API key, and configure a phone number sender.
+
 
 **Two-layer review gate**:
 - `/refacil:up-code` detects a missing `.review-passed` and **automatically runs `/refacil:review`** before pushing.
 - The `check-review` hook also intercepts manual `git push` commands and **blocks** the operation if it is missing. The hook does not invoke skills — it only blocks and instructs.
 
+**Behavior on failure**:
+- Autopilot stops at the failing phase, preserves the working tree for inspection, records the relevant evidence, and sends a Kapso failure notification when configured.
+- Normal recovery does not use destructive reset commands. The developer decides how to keep, fix, or discard local edits after reviewing the evidence.
+
 **Archive**:
-- For features/improvements: the CLI moves artifacts to `archive/` and extracts `.review-passed` fields to `review.yaml` inside each affected spec.
-- For bugs: manual archiving, creates `refacil-sdd/specs/fix-*/spec.md` in standard format + `review.yaml`.
+- For features/improvements: the archive flow moves artifacts to `archive/` and persists `.review-passed` fields to `review.yaml` inside each affected spec. Specs can live in `specs.md`, recursive `specs/**/*.md`, or both; `sync-spec` consumes the same source set as `sdd status`.
+- For bugs: `fix-*` folders are the operational exception to regular proposal readiness. They archive with `summary.md`, regression test evidence, and `.review-passed`, then create `refacil-sdd/specs/fix-*/spec.md` in standard format + `review.yaml`.
 - A single branch can accumulate multiple bugs, each in its own independent `fix-*/` folder.
 - `/refacil:archive` always requests one or more **task references** associated with the change before proceeding. Accepted formats: URL, ticket/issue identifier, or task name. References are stored in `review.yaml` under the `taskReferences` field (YAML list). This field is mandatory — archiving does not proceed until the user provides at least one reference.
+- `/refacil:archive` uses current `/refacil:test` evidence from `memory.yaml` by default. In normal mode it asks before continuing if evidence is missing or stale; in autopilot mode it aborts instead of silently re-running or widening tests.
 
 ---
 
@@ -320,19 +454,19 @@ Installed during `init` / `update` for each selected IDE. The same four behavior
 
 | Behavior | Claude Code | Cursor | OpenCode | Codex |
 |---|---|---|---|---|
-| **check-update** | `SessionStart` hook in `~/.claude/settings.json` | `SessionStart` hook in `~/.cursor/hooks.json` | `session.created` handler in the global OpenCode plugin | `sessionStart` hook in `~/.codex/config.toml` |
+| **check-update** | `SessionStart` → `refacil-sdd-ai check-update` | `sessionStart` → same CLI (single entry; no `workspaceOpen` duplicate) | `session.created` → same CLI (`node …/bin/cli.js check-update`) | `sessionStart` → same CLI |
 | **notify-update** | `UserPromptSubmit` hook | `beforeSubmitPrompt` hook | `tui.prompt.append` handler | `userPromptSubmit` hook in `~/.codex/config.toml` |
 | **compact-bash** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool | `preToolUse` hook (Bash matcher) in `~/.codex/config.toml` |
 | **check-review** | `PreToolUse` (Bash) hook | `PreToolUse` (Bash) hook | `tool.execute.before` handler for bash tool | `preToolUse` hook (Bash matcher) in `~/.codex/config.toml` |
 
 | Behavior | What it does |
 |---|---|
-| `check-update` | On startup: deletes `.refacil-pending-update` if no migration is pending (stale flags). Then: npm check, sync skills, **compact-guidance**. If skills were synced **and** a migration is pending, writes the flag for `notify-update`. Always refreshes the flag content when a migration is pending (keeps the `to` version current). |
+| `check-update` | On startup: deletes `.refacil-pending-update` if no migration is pending (stale flags). Then: npm check, sync skills, **compact-guidance**, **CodeGraph** auto-init/reindex when enabled. If skills were synced **and** a migration is pending, writes the flag for `notify-update`. Always refreshes the flag content when a migration is pending (keeps the `to` version current). Repo root: `CURSOR_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`, then Cursor `workspace_roots` from stdin, then `.git` traversal (never the embedded `refacil-sdd-ai/` package inside a monorepo). |
 | `notify-update` | If the flag exists **and** a methodology migration is pending (same table as `/refacil:update`), injects the instruction before the agent processes the next user message; if the sync happened without a migration, the flag is not created or is discarded silently. |
 | `compact-bash` | Silently rewrites bare Bash commands. No extra turns, the IDE does not see the change. Requires Claude Code >= 2.1.89 for the `updatedInput` path. |
-| `check-review` | Intercepts `git push` and blocks if `.review-passed` is missing in any active change. |
+| `check-review` | Intercepts `git push` and blocks if an active change has started implementation (`tasks.md` with ≥1 `[x]`) without `.review-passed`. |
 
-> **OpenCode plugin**: a single file installed in the global OpenCode plugins directory implements all four behaviors. It loads `lib/compact/rules.js` from the package to reuse the same rewrite rules — no duplicated logic. If the rules file is not resolvable, compact-bash is disabled gracefully with a warning to stderr; the plugin never crashes the session.
+> **OpenCode plugin**: a single file installed in the global OpenCode plugins directory implements all four behaviors. `session.created` shells out to the same `check-update` CLI as the other IDEs (not a partial reimplementation). For `compact-bash` it loads `rules.js` co-installed in `~/.config/opencode/plugins/` alongside `refacil-hooks.js`, with fallback to `lib/compact/rules.js` from the npm package — no duplicated rewrite logic. If the rules file is not resolvable, compact-bash is disabled gracefully with a warning to stderr; the plugin never crashes the session.
 
 > **Codex hooks**: injected into `~/.codex/config.toml` under `[hooks]` with `[features] codex_hooks = true`. Each SDD-AI hook entry carries a boolean marker (`_sdd`, `_sdd_compact`, `_sdd_review`, `_sdd_notify`) for clean removal on `clean`. User-defined hooks outside these entries are preserved.
 
@@ -442,7 +576,8 @@ Local bus (WebSocket over `127.0.0.1`) so agents across different repos can comm
 **Properties**:
 
 - 100% local: nothing leaves `127.0.0.1`. No accounts, no shared service.
-- Zero config: the broker auto-spawns the first time a skill needs it (`127.0.0.1:7821`, fallback 7822/7823).
+- Zero config: the broker auto-spawns the first time a skill needs it (`127.0.0.1:7821`, fallback 7822/7823). If all three fixed candidates are occupied by external processes, the broker binds an OS-assigned ephemeral port instead of failing — clients discover the actual port automatically.
+- **Port override (`REFACIL_BUS_PORT`)**: set this env var when the broker spawns to bind a specific port exclusively — a fixed number (e.g. `REFACIL_BUS_PORT=9000`), or `0` to force an OS-assigned ephemeral port. Useful in CI or sandboxed environments where `7821-7823` are unavailable or reserved.
 - ~40 MB RAM, 0% CPU idle. Persistence: `~/.refacil-sdd-ai/bus/<room>/inbox.jsonl` (7-day rotation).
 - Same skills in Claude Code and Cursor.
 
@@ -490,10 +625,11 @@ Skills, sub-agents, and hooks are installed into the user's global IDE directori
 ~/.cursor/agents/refacil-*.md  # Cursor sub-agents (readonly:true/false + model:inherit, auto-generated)
 ~/.cursor/hooks.json           # SDD hooks merged in (same four behaviors)
 
-# OpenCode (if selected)  — macOS/Linux: ~/.config/opencode/   Windows: %APPDATA%\opencode
+# OpenCode (if selected)  — all platforms: ~/.config/opencode/  (override: OPENCODE_CONFIG_DIR)
 ~/.config/opencode/skills/refacil-*/    # OpenCode skills
 ~/.config/opencode/agents/refacil-*.md  # OpenCode sub-agents (permission block + mode:subagent)
 ~/.config/opencode/plugins/refacil-hooks.js  # Plugin: session.created + tui.prompt.append + tool.execute.before
+~/.config/opencode/plugins/refacil-check-review.js  # Shared git push review gate (used by refacil-hooks.js)
 
 # Codex (if selected)
 ~/.codex/skills/refacil-*/             # Codex skills (same content as Claude Code)
@@ -509,15 +645,15 @@ Skills, sub-agents, and hooks are installed into the user's global IDE directori
 
 ### Per repo (generated by `/refacil:setup`)
 
-The only per-repo step is running `/refacil:setup` once per project. It generates the project index — no IDE skills or hooks are written to the repo.
+The per-repo step is **`/refacil:setup`** once per project. It generates the **project index** (**`AGENTS.md`**, **`.agents/`**, **`refacil-sdd/changes/`**) and invokes **`refacil-sdd-ai sync-repo-ide`**, which writes **stub + ignore files** according to **`~/.refacil-sdd-ai/selected-ides.json`** (no need for `.claude/` / `.cursor/` folders in the repo). **Skills and hooks remain global**, not copied into the project.
 
 ```
-# Shared (IDE-agnostic)
-CLAUDE.md                    # Minimal index → points to AGENTS.md
-.cursorrules                 # Cursor format equivalent of CLAUDE.md
-.claudeignore                # Base exclusions (node_modules, dist, .env, *.key, etc.)
-.cursorignore                # Same content as .claudeignore
-.opencodeignore              # Same content as .claudeignore
+# Shared — project index from /refacil:setup; stubs + ignores from sync-repo-ide / selected IDE list
+CLAUDE.md                    # Minimal index → AGENTS.md (if Claude Code is in your IDE selection)
+.cursorrules                 # Same role for Cursor if Cursor is selected
+.claudeignore                # Base exclusions (node_modules, dist, .env, …) when Claude is selected
+.cursorignore                # Same template as .claudeignore when Cursor is selected
+.opencodeignore              # Same when OpenCode is selected
 AGENTS.md                    # Project index → generated by /refacil:setup
                              # Points to .agents/ + includes auto-managed blocks
                              # (compact-guidance and bus presentation)
@@ -532,6 +668,45 @@ refacil-sdd/                 # SDD artifacts store
 > **Migration from project-level installs**: the `check-update` hook (SessionStart) automatically detects and removes any leftover project-level `refacil-*` skills, agents, hooks, and empty IDE directories from older versions.
 
 ---
+
+## Third-party integrations
+
+### CodeGraph (optional)
+
+- **Author**: Colby McHenry
+- **License**: MIT
+- **Repository**: https://github.com/colbymchenry/codegraph
+- **Purpose**: When present, reduces token consumption ~71% in exploratory sub-agents
+  (`refacil-investigator`, `refacil-proposer`, `refacil-debugger`) by querying an indexed call graph
+  instead of reading source files directly. The methodology works without it — CodeGraph is purely optional.
+
+**How it works**: after `refacil-sdd-ai init` sets `codegraphMode: enabled`, the setup step
+(`/refacil:setup`) runs `refacil-sdd-ai codegraph init` in the background. This creates a `.codegraph/`
+directory at the repo root. Exploratory sub-agents detect `.codegraph/` at the start of each session
+and prefer CodeGraph symbol queries (`codegraph_search`, `codegraph_callers`, `codegraph_callees`,
+`codegraph_context`, `codegraph_impact`) over raw file reads.
+
+**Opt-out** at any time:
+
+```bash
+refacil-sdd-ai sdd write-config --global --codegraph disabled
+```
+
+Or set `codegraphMode: disabled` in `~/.refacil-sdd-ai/config.yaml`.
+
+**Modes**:
+
+| Mode | Behavior |
+|---|---|
+| `enabled` | Auto-index every repo on `/refacil:setup` (recommended) |
+| `per-repo` | Ask once per project during `/refacil:setup` |
+| `disabled` | Never use CodeGraph |
+
+Configure during `refacil-sdd-ai init` or at any time:
+
+```bash
+refacil-sdd-ai sdd write-config --global --codegraph enabled
+```
 
 ## Technologies
 

@@ -1,6 +1,6 @@
 ---
 name: refacil:join
-description: Join (or create) an agent bus room to communicate with Claude Code / Cursor sessions in other repos. Session name = repo folder name.
+description: Join (or create) an agent bus room to communicate with Claude Code, Cursor, OpenCode, or Codex sessions in other repos. Session name = repo folder name.
 user-invocable: true
 ---
 

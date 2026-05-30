@@ -31,6 +31,15 @@ The CLI prints the new messages (if any) with `from`, `kind`, text, and timestam
 
 Present the new messages clearly and, if applicable, propose the next step.
 
+## What appears in the inbox
+
+The inbox for this session shows **only**:
+
+1. **`ask` messages directed to this session** — sent by another session with `bus ask --to [this-session]` or `bus ask --to all`.
+2. **`reply` messages to your own `correlationId`** — responses to questions you sent with `bus ask`.
+
+**`say` (broadcast) messages from other sessions do NOT appear in this session's inbox.** `say` is a real-time broadcast only; sessions that were not connected when the `say` was sent will never see it in the inbox. For content that must be received and acted on, use `bus ask --to SESSION` instead.
+
 ## When to use `/refacil:inbox`
 
 - After a `/refacil:ask --wait N` expired without a response — to check if it arrived later.

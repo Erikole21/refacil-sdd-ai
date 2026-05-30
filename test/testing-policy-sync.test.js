@@ -47,6 +47,28 @@ describe('testing-policy-sync', () => {
     assert.equal(r2.status, 'unchanged');
   });
 
+  test('unchanged when file has trailing extra whitespace (simulates IDE/git normalization)', () => {
+    fs.mkdirSync(path.join(tmp, '.agents'));
+    syncTestingPolicyBlock(tmp, pkgRoot);
+    const p = path.join(tmp, '.agents', 'testing.md');
+    // Simulate IDE or git adding an extra trailing newline
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8') + '\n');
+    const r = syncTestingPolicyBlock(tmp, pkgRoot);
+    assert.equal(r.status, 'unchanged');
+  });
+
+  test('unchanged when testing.md uses CRLF line endings (Windows)', () => {
+    fs.mkdirSync(path.join(tmp, '.agents'));
+    syncTestingPolicyBlock(tmp, pkgRoot);
+    const p = path.join(tmp, '.agents', 'testing.md');
+    const lf = fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+    fs.writeFileSync(p, lf.replace(/\n/g, '\r\n'), 'utf8');
+    const mtimeBefore = fs.statSync(p).mtimeMs;
+    const r = syncTestingPolicyBlock(tmp, pkgRoot);
+    assert.equal(r.status, 'unchanged');
+    assert.equal(fs.statSync(p).mtimeMs, mtimeBefore, 'must not rewrite CRLF file when content is identical');
+  });
+
   test('appends block when file exists without markers', () => {
     fs.mkdirSync(path.join(tmp, '.agents'));
     fs.writeFileSync(path.join(tmp, '.agents', 'testing.md'), '# My tests\n\nHello\n', 'utf8');

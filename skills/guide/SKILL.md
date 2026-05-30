@@ -20,7 +20,9 @@ You are a **brief** guide: you choose the next command; the detail of each flow 
 
 ## Menu
 
-1. New feature → `/refacil:propose` → `/refacil:apply` → `/refacil:test` → `/refacil:verify` → `/refacil:review` → `/refacil:archive` → `/refacil:up-code`
+1. New feature → `/refacil:propose` → *(optional)* `/refacil:read-spec` → then choose implementation:
+   - **Step-by-step (A):** `/refacil:apply` → `/refacil:test` (suite + coverage) → `/refacil:verify` (CA/CR; no full re-test by default) → `/refacil:review` (checklist; no suite) → `/refacil:archive` → `/refacil:up-code`
+   - **Autonomous (B):** `/refacil:autopilot` — chains apply → test → verify → review → archive in one invocation; up-code (push + PR) is optional and configured in pre-flight (the user chooses whether to end at archive or continue with up-code); optional WhatsApp via `refacil-sdd-ai kapso setup`
 2. Bug → `/refacil:bug` → `/refacil:review` → `/refacil:archive` → `/refacil:up-code`
 3. Explore → `/refacil:explore`
 4. Tests → `/refacil:test`
@@ -30,12 +32,23 @@ You are a **brief** guide: you choose the next command; the detail of each flow 
 8. Configure repo → `refacil-sdd-ai init` (global + per repo) and `/refacil:setup`
 9. Migrate documentation to current pattern → `/refacil:update`
 10. Coordinate with other repos (without manual copy/paste) → see **Bus between agents** block below
+11. Autonomous pipeline (after approved propose) → `/refacil:autopilot` — same chain as option 1 path B; use when you want autonomous execution ("autopilot", "modo autónomo", "termina solo el flujo"). During pre-flight you define whether up-code (push + PR) is included — the cycle adapts and can end at archive or continue with up-code.
+12. Listen to specs with voice (TTS) → `/refacil:read-spec` — on-device browser playback; post-propose option B in propose, or on-demand for active changes / archived specs (`refacil-sdd-ai read-spec --change <name>`)
+13. Change progress and metrics → `/refacil:stats` — task completion, review gate, test commands from `memory.yaml` (`refacil-sdd-ai sdd stats <changeName>`)
 
 > **Note**: `up-code` verifies `.review-passed` before push; see `METHODOLOGY-CONTRACT.md §5-6` for details.
 
+> **Skill parity**: 21 user-invocable skills (`user-invocable: true`, excluding internal `prereqs`) must appear in `SKILLS[]`, this menu, and the README "Available IDE Skills" table — including `read-spec` and `stats`.
+
+### After `/refacil:propose` is approved
+
+- **`/refacil:read-spec`** (optional): opens the change folder in the browser and reads proposal, design, tasks, and specs aloud in order — useful before choosing implementation.
+- **`/refacil:apply`** (path A): step-by-step; each phase pauses for confirmation.
+- **`/refacil:autopilot`** (path B): fully autonomous; path B is independent — it runs review, archive, and optionally up-code internally. During pre-flight the user configures whether up-code is included (cycle ends at archive or at a PR). Does not merge into path A.
+
 ## Bus between agents (refacil-bus)
 
-For when the dev has multiple Claude Code / Cursor windows open (one per repo) and needs agents to consult each other without the dev being the manual transcriber:
+For when the dev has multiple IDE sessions open (one per repo) and needs agents to consult each other without the dev being the manual transcriber:
 
 | Command | When to use |
 |---------|-------------|
@@ -58,22 +71,27 @@ Full detail in the refacil-sdd-ai README (section `refacil-bus`).
 
 ## Tips (one line per tool)
 
-- **Claude Code:** `/refacil:*` commands in the chat.
-- **Cursor:** `/refacil:*` commands in Composer; `@` for context files.
+- **IDE chat / composer:** `/refacil:*` commands in the chat or composer panel.
+- **Listen to specs:** `/refacil:read-spec` or `refacil-sdd-ai read-spec --change <changeName>` — local TTS only, no remote APIs.
+- **Hands-off implementation:** `/refacil:autopilot [changeName]` after propose is approved — in pre-flight you choose whether up-code (push + PR) is included. Configure Kapso once with `refacil-sdd-ai kapso setup` for WhatsApp notification on finish.
 
 ## Rules
 
-- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) to the continuity question in step 4 of Instructions, immediately invoke the **Skill tool** with the exact name resolved from the menu option you recommended. Deterministic resolution by Menu option:
-  - Option 1 (New feature) → `skill: "refacil:propose"`
-  - Option 2 (Bug) → `skill: "refacil:bug"`
-  - Option 3 (Explore) → `skill: "refacil:explore"`
-  - Option 4 (Tests) → `skill: "refacil:test"`
-  - Option 5 (Validate implementation) → `skill: "refacil:verify"`
-  - Option 6 (Quality review) → `skill: "refacil:review"`
-  - Option 7 (Push code and create PR) → `skill: "refacil:up-code"`
-  - Option 8 (Configure repo) → `skill: "refacil:setup"`
+- **Flow continuity**: if the user confirms affirmatively ("yes", "ok", "go", "continue", etc.) to the continuity question in step 4 of Instructions, immediately execute the resolved `/refacil:<skill>` command. Deterministic resolution by Menu option:
+  - Option 1 (New feature) → `/refacil:propose`
+  - Option 2 (Bug) → `/refacil:bug`
+  - Option 3 (Explore) → `/refacil:explore`
+  - Option 4 (Tests) → `/refacil:test`
+  - Option 5 (Validate implementation) → `/refacil:verify`
+  - Option 6 (Quality review) → `/refacil:review`
+  - Option 7 (Push code and create PR) → `/refacil:up-code`
+  - Option 8 (Configure repo) → `/refacil:setup`
   - Option 9 (Migrate documentation) → `skill: "refacil:update"`
   - Option 10 (Bus between agents) → `skill: "refacil:join"` (or another from the group `refacil:say`/`refacil:ask`/`refacil:reply`/`refacil:attend`/`refacil:inbox` depending on the expressed intent).
+  - Option 11 (Autonomous pipeline) → `/refacil:autopilot`
+  - Option 12 (Listen to specs) → `/refacil:read-spec`
+  - Option 13 (Change progress) → `/refacil:stats`
+  - Post-propose context with a single clear next step: if artifacts are approved and the user wants hands-off → `/refacil:autopilot`; if they want to hear specs first → `/refacil:read-spec`; if they want step-by-step → `/refacil:apply`.
   - If the intent does not map exactly to an option, do NOT invoke — list numbered options to the user and ask for explicit selection.
 
   Do not describe it in text or wait for the user to type the command. (See `METHODOLOGY-CONTRACT.md §5`.)
