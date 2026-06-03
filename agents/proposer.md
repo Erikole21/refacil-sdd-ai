@@ -196,6 +196,16 @@ If the change involves a contract with another system (external API, event, queu
 
 If the input comes from a bus room agreement, still generate all artifacts in full according to the SDD-AI methodology. See `METHODOLOGY-CONTRACT.md` and `BUS-CROSS-REPO.md` (room agreements section).
 
+### Step 2.5: Record proposed state
+
+After writing all four artifacts, run:
+
+```bash
+refacil-sdd-ai sdd set-memory <changeName> --state proposed --actor proposer
+```
+
+This records the initial state in `memory.yaml` for cross-skill tracking. If the command fails (e.g. the change directory does not exist yet at that point), skip silently — it must not block the flow.
+
 ### Step 3: Report + JSON block
 
 Your final response MUST have this structure:

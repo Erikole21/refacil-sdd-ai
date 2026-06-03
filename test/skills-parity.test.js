@@ -11,7 +11,7 @@ const packageRoot = path.resolve(__dirname, '..');
 const skillsRoot = path.join(packageRoot, 'skills');
 const readmePath = path.join(packageRoot, 'README.md');
 
-const EXPECTED_USER_INVOCABLE_COUNT = 21;
+const EXPECTED_USER_INVOCABLE_COUNT = 22;
 
 function parseUserInvocableSkillNames() {
   const names = [];
@@ -60,7 +60,7 @@ function docMentionsIde(content, ide) {
 }
 
 describe('SKILLS parity — user-invocable vs SKILLS[] vs README', () => {
-  test('exactly 21 user-invocable skills in skills/', () => {
+  test('exactly 22 user-invocable skills in skills/', () => {
     const invocable = parseUserInvocableSkillNames();
     assert.equal(
       invocable.length,

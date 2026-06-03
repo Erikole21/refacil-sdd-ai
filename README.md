@@ -277,6 +277,7 @@ All invoked as `/refacil:<name>` in Claude Code, Cursor, OpenCode, or Codex.
 | `/refacil:bug` | Full bugfix flow with regression tests |
 | `/refacil:update` | Detect and apply pending methodology migrations to the current repo |
 | `/refacil:stats` | Show change progress, task status, review gate, and test commands from SDD artifacts |
+| `/refacil:status` | Show which phase of the SDD-AI cycle a change is in and the exact command to resume it |
 | `/refacil:read-spec` | Listen to change specs in the browser with on-device TTS |
 | `/refacil:autopilot` | Autonomous pipeline: chains apply → test → verify → review → archive in one invocation; up-code (push + PR) is optional and configured in pre-flight. Optional WhatsApp notification via `~/.refacil-sdd-ai/kapso.env` |
 

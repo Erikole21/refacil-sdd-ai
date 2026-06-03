@@ -51,7 +51,9 @@ Parse the JSON block returned by the CLI. Expected fields:
   "memory": {
     "testCommand": "<command or null>",
     "lastStep": "<step or null>",
-    "criteriaRun": ["CA-01", "CR-01", ...]
+    "criteriaRun": ["CA-01", "CR-01", ...],
+    "currentState": "<state or null>",
+    "stateInferred": true | false
   },
   "review": {
     "passed": true | false,
@@ -86,6 +88,7 @@ Present the data in a readable format. If `isArchived` is `true`, add `[archivad
 
 Phase progress
   Started:    <startDate or "unknown">
+  Current state: <currentState or "unknown"> <(inferred) if stateInferred is true>
   Last step:  <lastStep or "not recorded">
   Criteria:   <criteriaRun list or "none">
 

@@ -113,6 +113,14 @@ specsNote: <"specs.md" | "specs/**/*.md" | "both — report contradictions in is
 
 ### Step 2: Delegate to the refacil-implementer sub-agent
 
+Before delegating, record that implementation has started:
+
+```bash
+refacil-sdd-ai sdd set-memory <changeName> --state apply-in-progress --actor apply-skill
+```
+
+If the command fails, continue silently — it must not block the flow.
+
 Invoke the `refacil-implementer` sub-agent passing it the BRIEFING from the previous step plus:
 - `changeName` (redundant with the briefing, but the guardrail needs it)
 - If the user requested detailed mode, indicate it. Default: concise.
@@ -130,7 +138,9 @@ Run:
 ```bash
 refacil-sdd-ai sdd set-memory <changeName> \
   --last-step apply \
-  --touched-files "<comma-separated list of modified files>"
+  --touched-files "<comma-separated list of modified files>" \
+  --state applied \
+  --actor apply-skill
 ```
 
 This command merges into memory.yaml at the repo root using `findProjectRoot()` — no manual path construction needed.

@@ -354,9 +354,10 @@ When any phase fails:
    - `errorSummary`: 1-3 line summary.
    - `branchAtFailure`: `git branch --show-current`.
    - `lastCommit`: `git log -1 --oneline`.
-4. Delete the autopilot marker: `rm -f "refacil-sdd/.autopilot-active"`.
-5. Send the failure notification via Kapso only if `kapsoEnabled = true` (Step 7, failure template).
-6. Leave the working tree as-is so the user can inspect when they return. Normal recovery must never use destructive reset commands; preserve local edits and report the evidence needed for manual repair.
+4. Send the failure notification via Kapso only if `kapsoEnabled = true` (Step 7, failure template).
+5. Leave the working tree as-is so the user can inspect when they return. Normal recovery must never use destructive reset commands; preserve local edits and report the evidence needed for manual repair.
+
+> **Note**: do NOT delete `refacil-sdd/.autopilot-active` here. Step 8 deletes the marker unconditionally at the end of the cycle — this keeps the marker alive during Step 7 in both success and failure paths, so the CLI can compute the exact duration from `startedAt`.
 
 ### Step 7: Notify via Kapso
 
@@ -364,37 +365,65 @@ When any phase fails:
 
 All notification logic — credentials, message formatting, HTTP call, error logging — is handled by the CLI. Do NOT construct curl calls or read the env file directly.
 
+**Send the notification exactly ONCE, with every flag resolved to a real value — never a placeholder.** Before invoking `kapso notify`, confirm that `repoSlug`, `changeName`, `branchAtStart`/`branchAtFailure`, `tasks.done`/`tasks.total` (and `phase` on failure) are all filled with concrete values captured in Steps 0–6 — there must be no literal `<...>` token left in the command. Do NOT fire a first "probe" call and then a corrected one: a single notification per run. The CLI **rejects** any `notify` whose required flags are missing, empty, or still contain a `<placeholder>` (it exits non-zero without sending, and prints which flags are wrong). If you see that rejection, it means a value was not resolved — fill it in from the captured state and invoke once more; do not let an empty notification go out.
+
 **Success notification**:
+
+Required flags (validated by `validateNotifyOpts`; the CLI rejects the call if any is missing or contains a placeholder):
+- `--repo` — repository slug (e.g. `refacil-ia`)
+- `--change` — change name (e.g. `imp-session-timeout-redis`)
+- `--branch` — branch at start (e.g. `feature/imp-session-timeout-redis`)
+- `--tasks` — tasks in `done/total` format (e.g. `5/5`). Must match `^\d+/\d+$`.
+
+Optional flags (omit if not applicable):
+- `--pr` — PR link, empty string, or `"skipped"` (see rules below)
+- `--apply`, `--test`, `--review` — improvement counters (integer, default `0`)
+- `--warnings` — top 3 warning strings joined by `|` (omit or pass `""` if none)
+
+> **Duration**: the CLI computes the run duration automatically from the `startedAt` field written to `.autopilot-active` in Step 0.7. You do **not** need to pass `--duration` — omit it and the CLI reads `startedAt` from the marker. Only pass `--duration <minutes>` as a manual fallback if the marker was unavailable for some reason (this should never happen with the corrected Step 6 that no longer deletes the marker before Step 7).
 
 The `--pr` flag value depends on `includeUpCode`:
 - `includeUpCode = true` and push succeeded with PR → `--pr "<prLink>"`
 - `includeUpCode = true` and push succeeded without PR (`createPR = false`) → `--pr ""` (empty string)
 - `includeUpCode = false` → `--pr "skipped"`
 
+Example (all required flags filled with real values):
+
 ```bash
 refacil-sdd-ai kapso notify success \
-  --repo "<repoSlug>" \
-  --change "<changeName>" \
-  --branch "<branchAtStart>" \
-  --tasks "<tasks.done>/<tasks.total>" \
-  --duration "<minutes>" \
-  --pr "<prLink | empty string | skipped>" \
-  --apply "<improvementsApplied.apply>" \
-  --test "<improvementsApplied.test>" \
-  --review "<improvementsApplied.review>" \
-  --warnings "<top 3 warnings joined by | or empty>"
+  --repo "refacil-ia" \
+  --change "imp-session-timeout-redis" \
+  --branch "feature/imp-session-timeout-redis" \
+  --tasks "5/5" \
+  --pr "https://github.com/org/refacil-ia/pull/42" \
+  --apply "1" \
+  --test "0" \
+  --review "0" \
+  --warnings ""
 ```
 
 **Failure notification**:
 
+Required flags:
+- `--repo` — repository slug
+- `--change` — change name
+- `--branch` — branch at the moment of failure (`branchAtFailure`)
+- `--phase` — which phase failed (e.g. `verify`, `test`, `apply`, `review`, `archive`, `up-code`)
+
+Optional flags:
+- `--last-commit` — last commit hash + message from `git log -1 --oneline`
+- `--error` — 1-3 line error summary
+
+Example (all required flags filled with real values):
+
 ```bash
 refacil-sdd-ai kapso notify failure \
-  --repo "<repoSlug>" \
-  --change "<changeName>" \
-  --branch "<branchAtFailure>" \
-  --phase "<phase>" \
-  --last-commit "<lastCommit>" \
-  --error "<errorSummary>"
+  --repo "refacil-ia" \
+  --change "imp-session-timeout-redis" \
+  --branch "feature/imp-session-timeout-redis" \
+  --phase "verify" \
+  --last-commit "a1b2c3d feat: add session timeout to Redis store" \
+  --error "verify: 2 unresolved CRITICAL findings after 2 autofix rounds"
 ```
 
 The CLI reads credentials from `~/.refacil-sdd-ai/kapso.env` internally. If Kapso returns an error, it logs to `~/.refacil-sdd-ai/autopilot.log` and exits without crashing — the SDD work is intact.

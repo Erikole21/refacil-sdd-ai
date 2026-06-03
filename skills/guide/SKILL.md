@@ -35,10 +35,13 @@ You are a **brief** guide: you choose the next command; the detail of each flow 
 11. Autonomous pipeline (after approved propose) → `/refacil:autopilot` — same chain as option 1 path B; use when you want autonomous execution ("autopilot", "modo autónomo", "termina solo el flujo"). During pre-flight you define whether up-code (push + PR) is included — the cycle adapts and can end at archive or continue with up-code.
 12. Listen to specs with voice (TTS) → `/refacil:read-spec` — on-device browser playback; post-propose option B in propose, or on-demand for active changes / archived specs (`refacil-sdd-ai read-spec --change <name>`)
 13. Change progress and metrics → `/refacil:stats` — task completion, review gate, test commands from `memory.yaml` (`refacil-sdd-ai sdd stats <changeName>`)
+14. Current phase and resume → `/refacil:status` — which phase of the SDD-AI cycle a change is in and the exact command to resume it (`refacil-sdd-ai sdd status <changeName>`)
 
 > **Note**: `up-code` verifies `.review-passed` before push; see `METHODOLOGY-CONTRACT.md §5-6` for details.
 
-> **Skill parity**: 21 user-invocable skills (`user-invocable: true`, excluding internal `prereqs`) must appear in `SKILLS[]`, this menu, and the README "Available IDE Skills" table — including `read-spec` and `stats`.
+> **Skill parity**: 22 user-invocable skills (`user-invocable: true`, excluding internal `prereqs`) must appear in `SKILLS[]`, this menu, and the README "Available IDE Skills" table — including `read-spec`, `stats`, and `status`.
+
+> **stats vs status**: `/refacil:stats` shows **telemetry** (token savings, compact rewrites, CodeGraph calls, review history). `/refacil:status` shows **navigation** (current cycle phase, next skill to run, state history). Use status to navigate the flow; use stats for observability data.
 
 ### After `/refacil:propose` is approved
 
@@ -91,6 +94,7 @@ Full detail in the refacil-sdd-ai README (section `refacil-bus`).
   - Option 11 (Autonomous pipeline) → `/refacil:autopilot`
   - Option 12 (Listen to specs) → `/refacil:read-spec`
   - Option 13 (Change progress) → `/refacil:stats`
+  - Option 14 (Current phase and resume) → `/refacil:status`
   - Post-propose context with a single clear next step: if artifacts are approved and the user wants hands-off → `/refacil:autopilot`; if they want to hear specs first → `/refacil:read-spec`; if they want step-by-step → `/refacil:apply`.
   - If the intent does not map exactly to an option, do NOT invoke — list numbered options to the user and ask for explicit selection.
 

@@ -67,7 +67,15 @@ describe('T-07-b: initSession not exported from lib/kapso.js', () => {
   test('CA-08: module.exports only has the expected keys (no extra unknown exports)', () => {
     const kapso = require('../lib/kapso');
     const exportedKeys = Object.keys(kapso).sort();
-    const expectedKeys = ['PHONE_REGEX', 'notify', 'preflight', 'readCredentials', 'setup'].sort();
+    const expectedKeys = [
+      'PHONE_REGEX',
+      'notify',
+      'preflight',
+      'readCredentials',
+      'setup',
+      'validateNotifyOpts',
+      'isBlankOrPlaceholder',
+    ].sort();
     assert.deepEqual(
       exportedKeys,
       expectedKeys,

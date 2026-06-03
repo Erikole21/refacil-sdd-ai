@@ -124,7 +124,9 @@ Run:
 refacil-sdd-ai sdd set-memory <changeName> \
   --last-step test \
   --commands-run "<test command used>" \
-  --criteria-run "<comma-separated criteria IDs that were run>"
+  --criteria-run "<comma-separated criteria IDs that were run>" \
+  --state tested \
+  --actor test-skill
 ```
 
 If `stackDetected` is available, add `--stack-detected "<stack>"` to the command as well.

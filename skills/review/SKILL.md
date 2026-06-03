@@ -167,6 +167,14 @@ Where the values are extracted from the sub-agent's `refacil-review-result` bloc
 - `changeName` is null.
 - The sub-agent returned `SCOPE_ERROR`.
 
+After writing `.review-passed` with an approved verdict, record the state:
+
+```bash
+refacil-sdd-ai sdd set-memory <changeName> --state reviewed --actor review-skill
+```
+
+If the command fails or `changeName` is null, continue silently — it must not block the flow.
+
 ### Step 3.5: Offer to apply corrections (only if REQUIERE CORRECCIONES)
 
 If `verdict` is `REQUIERE CORRECCIONES`:

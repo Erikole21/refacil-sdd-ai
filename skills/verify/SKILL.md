@@ -148,6 +148,14 @@ Parse the ` ```refacil-verify-result ` block from the sub-agent.
 
 #### If `result` is APPROVED:
 
+Record that verification completed successfully:
+
+```bash
+refacil-sdd-ai sdd set-memory <changeName> --state verified --actor verify-skill
+```
+
+If the command fails, continue silently — it must not block the flow.
+
 - `autopilotMode = false` (normal): ask the user:
   ```
   RESULT: APPROVED

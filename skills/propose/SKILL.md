@@ -132,6 +132,14 @@ If the user requests limited adjustments (change a criterion, fix a path, adjust
 
 ### Step 4: Next step
 
+**Before presenting the menu**, record that the proposal has been approved by running:
+
+```bash
+refacil-sdd-ai sdd set-memory <changeName> --state approved --actor propose-skill
+```
+
+If the command fails, continue silently — it must not block the flow.
+
 **Always present this menu as a new message** immediately after Step 3 confirms approval. Never skip it or reuse the "OK" from Step 3 as a selection here — that "OK" means "the artifacts are approved", not "choose option A".
 
 Before presenting the menu, run `refacil-sdd-ai kapso preflight` (exits 0, prints JSON) and read `kapsoEnabled` from the output. If `kapsoEnabled = true`, append the WhatsApp note to option B. If `kapsoEnabled = false`, omit it.

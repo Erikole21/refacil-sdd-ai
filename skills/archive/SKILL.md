@@ -174,10 +174,18 @@ Minimal bug fixes only contain `summary.md` (and optionally `.review-passed`) an
      ```
    - If `review.yaml` already exists, update only the fields that changed without removing others.
 
-3. **Run the CLI archive**: `refacil-sdd-ai sdd archive <changeName>` — sync-spec, preserves `memory.yaml` if present, then moves the complete change directory to `refacil-sdd/changes/archive/<date>-<changeName>/`.
-4. Verify the command completed successfully (exit 0) and the original folder no longer exists.
+3. **Record archived state** — run this command **while the change directory is still at its original path** (`refacil-sdd/changes/<changeName>/`), before the CLI move in step 4. After the move that path no longer exists and `set-memory` would fail to locate the change:
 
-5. Continue to **Step 3**.
+   ```bash
+   refacil-sdd-ai sdd set-memory <changeName> --state archived --actor archive-skill
+   ```
+
+   If the command fails, continue silently — it must not block the flow.
+
+4. **Run the CLI archive**: `refacil-sdd-ai sdd archive <changeName>` — sync-spec, preserves `memory.yaml` if present, then moves the complete change directory to `refacil-sdd/changes/archive/<date>-<changeName>/`.
+5. Verify the command completed successfully (exit 0) and the original folder no longer exists.
+
+6. Continue to **Step 3**.
 
 The goal is for `refacil-sdd/specs/` to document how the system works TODAY.
 

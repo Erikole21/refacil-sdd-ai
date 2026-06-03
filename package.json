@@ -1,6 +1,6 @@
 {
   "name": "refacil-sdd-ai",
-  "version": "5.3.0",
+  "version": "5.3.1",
   "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor, OpenCode and Codex",
   "bin": {
     "refacil-sdd-ai": "./bin/cli.js"
@@ -40,7 +40,7 @@
   },
   "scripts": {
     "postinstall": "node ./bin/postinstall.js",
-    "test": "node --test --test-concurrency=1 test/global-paths.test.js test/opencode-global-path-windows.test.js test/opencode-migrate.test.js test/opencode-clean-global.test.js test/skills-parity.test.js test/multi-ide-parity-pass2.test.js test/repo-ide-sync.test.js test/global-install.test.js test/hooks.test.js test/installer.test.js test/ignore-files.test.js test/methodology-migration-pending.test.js test/sdd.test.js test/test-scope.test.js test/config.test.js test/refactor-integrar-openspec-nativo.test.js test/refactor-rutas-refacil-sdd.test.js test/refactor-agents-english.test.js test/remove-openspec-legacy.test.js test/find-project-root.test.js test/project-root.test.js test/opencode-installer.test.js test/opencode-plugin.test.js test/check-review.test.js test/toml-converter.test.js test/testing-policy-sync.test.js test/session-repo-sync.test.js test/compact-guidance.test.js test/codegraph.test.js test/codegraph-telemetry.test.js test/compact-codegraph.test.js test/autopilot-skill-install.test.js test/read-spec-md-parser.test.js test/read-spec.test.js test/spec-sync.test.js test/kapso-init-session-removed.test.js test/kapso-preflight.test.js test/autopilot-ready-message.test.js test/stats-observability.test.js test/bus-from-env.test.js test/imp-scoped-test-execution.test.js test/broker-port-env.test.js"
+    "test": "node --test --test-concurrency=1 test/global-paths.test.js test/opencode-global-path-windows.test.js test/opencode-migrate.test.js test/opencode-clean-global.test.js test/skills-parity.test.js test/multi-ide-parity-pass2.test.js test/repo-ide-sync.test.js test/global-install.test.js test/hooks.test.js test/installer.test.js test/ignore-files.test.js test/methodology-migration-pending.test.js test/sdd.test.js test/test-scope.test.js test/config.test.js test/refactor-integrar-openspec-nativo.test.js test/refactor-rutas-refacil-sdd.test.js test/refactor-agents-english.test.js test/remove-openspec-legacy.test.js test/find-project-root.test.js test/project-root.test.js test/opencode-installer.test.js test/opencode-plugin.test.js test/check-review.test.js test/toml-converter.test.js test/testing-policy-sync.test.js test/session-repo-sync.test.js test/compact-guidance.test.js test/codegraph.test.js test/codegraph-telemetry.test.js test/compact-codegraph.test.js test/autopilot-skill-install.test.js test/read-spec-md-parser.test.js test/read-spec.test.js test/spec-sync.test.js test/kapso-init-session-removed.test.js test/kapso-preflight.test.js test/autopilot-ready-message.test.js test/stats-observability.test.js test/bus-from-env.test.js test/imp-scoped-test-execution.test.js test/broker-port-env.test.js test/change-state-tracking.test.js"
   },
   "dependencies": {
     "smol-toml": "^1.6.1",
