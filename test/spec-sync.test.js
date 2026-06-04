@@ -73,6 +73,30 @@ describe('spec-sync', () => {
     assert.equal(items[1].isRejection, true);
   });
 
+  test('parseCriteriaBlocks accepts h3 headings (### CA-A01)', () => {
+    const md = '### CA-A01: Feature-prefixed\n**Given** x\n\n### CR-A01: Reject case\n**When** y';
+    const items = parseCriteriaBlocks(md);
+    assert.equal(items.length, 2);
+    assert.equal(items[0].id, 'CA-A01');
+    assert.equal(items[0].title, 'Feature-prefixed');
+    assert.equal(items[1].id, 'CR-A01');
+    assert.equal(items[1].isRejection, true);
+  });
+
+  test('parseCriteriaBlocks accepts alphanumeric ids (CA-G01, CA-12b)', () => {
+    const md = '## CA-G01: Group one\n\n## CA-12b: Suffixed';
+    const items = parseCriteriaBlocks(md);
+    assert.equal(items.length, 2);
+    assert.equal(items[0].id, 'CA-G01');
+    assert.equal(items[1].id, 'CA-12B'); // ids are upper-cased
+  });
+
+  test('parseCriteriaBlocks ignores non-criterion headings', () => {
+    const md = '## Requisitos\n\n### Scenario: setup\n**Given** nothing matches CA/CR';
+    const items = parseCriteriaBlocks(md);
+    assert.equal(items.length, 0);
+  });
+
   test('collectSpecSourceFiles finds nested specs/**/*.md in sorted order', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-sync-'));
     const changeDir = path.join(tmp, 'refacil-sdd', 'changes', 'nested-specs');
