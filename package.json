@@ -1,6 +1,6 @@
 {
   "name": "refacil-sdd-ai",
-  "version": "5.3.1",
+  "version": "5.3.2",
   "description": "SDD-AI: Specification-Driven Development with AI — development methodology using AI with Claude Code, Cursor, OpenCode and Codex",
   "bin": {
     "refacil-sdd-ai": "./bin/cli.js"
@@ -47,7 +47,6 @@
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
-    "@clack/prompts": "^0.9.0",
-    "@colbymchenry/codegraph": "0.7.9"
+    "@clack/prompts": "^0.9.0"
   }
 }

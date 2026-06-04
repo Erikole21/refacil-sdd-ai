@@ -355,3 +355,109 @@ describe('isStale — detects commits since last codegraph init', () => {
     assert.ok(!isNaN(ts.getTime()), 'timestamp must be a valid ISO date');
   });
 });
+
+// ── isVersionBelow — pure dotted-version comparison ────────────────────────────
+
+describe('isVersionBelow — strict lower-than for x.y.z versions', () => {
+  test('lower patch is below', () => {
+    assert.equal(codegraph.isVersionBelow('0.7.9', '0.9.9'), true);
+    assert.equal(codegraph.isVersionBelow('0.9.8', '0.9.9'), true);
+  });
+
+  test('equal version is NOT below', () => {
+    assert.equal(codegraph.isVersionBelow('0.9.9', '0.9.9'), false);
+  });
+
+  test('higher version is NOT below', () => {
+    assert.equal(codegraph.isVersionBelow('0.10.0', '0.9.9'), false);
+    assert.equal(codegraph.isVersionBelow('1.0.0', '0.9.9'), false);
+    assert.equal(codegraph.isVersionBelow('0.9.10', '0.9.9'), false);
+  });
+
+  test('compares numerically, not lexically (10 > 9)', () => {
+    assert.equal(codegraph.isVersionBelow('0.9.10', '0.9.9'), false);
+    assert.equal(codegraph.isVersionBelow('0.9.2', '0.9.10'), true);
+  });
+
+  test('malformed segments are treated as 0 and never throw', () => {
+    assert.doesNotThrow(() => codegraph.isVersionBelow('garbage', '0.9.9'));
+    assert.equal(codegraph.isVersionBelow('garbage', '0.9.9'), true); // 0.0.0 < 0.9.9
+    assert.equal(codegraph.isVersionBelow('', '0.0.0'), false);
+  });
+});
+
+// ── installedVersion / isOutdated / upgrade — non-throwing contracts ───────────
+
+describe('installedVersion — returns version string or null, never throws', () => {
+  test('returns a string or null', () => {
+    const v = codegraph.installedVersion();
+    assert.ok(v === null || typeof v === 'string');
+  });
+
+  test('when a string, looks like a dotted version', () => {
+    const v = codegraph.installedVersion();
+    if (typeof v === 'string') assert.match(v, /^\d+\.\d+\.\d+$/);
+  });
+
+  test('does not throw', () => {
+    assert.doesNotThrow(() => codegraph.installedVersion());
+  });
+});
+
+describe('isOutdated — boolean, consistent with installedVersion and MIN_VERSION', () => {
+  test('returns a boolean and never throws', () => {
+    assert.equal(typeof codegraph.isOutdated(), 'boolean');
+    assert.doesNotThrow(() => codegraph.isOutdated());
+  });
+
+  test('returns false when codegraph is not installed (unknown version never triggers upgrade)', () => {
+    if (codegraph.installedVersion() === null) {
+      assert.equal(codegraph.isOutdated(), false);
+    }
+  });
+
+  test('agrees with isVersionBelow against MIN_VERSION when installed', () => {
+    const v = codegraph.installedVersion();
+    if (typeof v === 'string') {
+      assert.equal(codegraph.isOutdated(), codegraph.isVersionBelow(v, codegraph.MIN_VERSION));
+    }
+  });
+
+  test('respects an explicit floor override', () => {
+    // Floor 0.0.0 can never be above any real install → never outdated
+    assert.equal(codegraph.isOutdated('0.0.0'), false);
+  });
+});
+
+describe('MIN_VERSION — exported version floor', () => {
+  test('is a dotted version string', () => {
+    assert.match(codegraph.MIN_VERSION, /^\d+\.\d+\.\d+$/);
+  });
+});
+
+describe('WATCHER_VERSION — version that ships the auto-sync daemon', () => {
+  test('is a dotted version string', () => {
+    assert.match(codegraph.WATCHER_VERSION, /^\d+\.\d+\.\d+$/);
+  });
+});
+
+describe('hasAutoSync — daemon keeps the graph fresh on its own', () => {
+  test('returns a boolean and never throws', () => {
+    assert.equal(typeof codegraph.hasAutoSync(), 'boolean');
+    assert.doesNotThrow(() => codegraph.hasAutoSync());
+  });
+
+  test('false when codegraph is not installed (unknown version → keep manual refresh)', () => {
+    if (codegraph.installedVersion() === null) {
+      assert.equal(codegraph.hasAutoSync(), false);
+    }
+  });
+
+  test('agrees with WATCHER_VERSION comparison when installed', () => {
+    const v = codegraph.installedVersion();
+    if (typeof v === 'string') {
+      // hasAutoSync is true exactly when the install is NOT below the watcher floor
+      assert.equal(codegraph.hasAutoSync(), !codegraph.isVersionBelow(v, codegraph.WATCHER_VERSION));
+    }
+  });
+});

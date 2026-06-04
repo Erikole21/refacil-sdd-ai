@@ -207,15 +207,6 @@ describe('CA-07: package.json scripts.test includes autopilot-skill-install.test
   });
 });
 
-// ── CA-08: package.json version is 5.3.0 ──────────────────────────────────────
-
-describe('CA-08: package.json version', () => {
-  test('package.json version is 5.3.0', () => {
-    const pkgPath = path.join(packageRoot, 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    assert.equal(pkg.version, '5.3.0', 'package.json version must be 5.3.0');
-  });
-});
 
 // ── CA-14 & CA-15: kapso.js — PHONE_REGEX validation logic ───────────────────
 

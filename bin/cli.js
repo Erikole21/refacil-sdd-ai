@@ -441,6 +441,40 @@ function maybeInjectCodegraphSuggestion() {
   }
 }
 
+/** Throttle window for the global CodeGraph CLI upgrade check: once per 7 days. */
+const CODEGRAPH_UPGRADE_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Upgrade the global codegraph CLI to the version floor when it is outdated,
+ * at most once per throttle window. Fire-and-forget (the upgrade itself runs in
+ * a detached background process). Stamps the marker BEFORE spawning so a slow or
+ * failed upgrade never retries on every session. Never throws.
+ */
+function maybeUpgradeCodegraph() {
+  try {
+    if (!codegraph.isOutdated()) return;
+    const markerDir = path.join(os.homedir(), '.refacil-sdd-ai');
+    const marker = path.join(markerDir, '.codegraph-upgrade-check');
+    let last = 0;
+    try {
+      const parsed = new Date(fs.readFileSync(marker, 'utf8').trim()).getTime();
+      if (!isNaN(parsed)) last = parsed;
+    } catch (_) {}
+    if (Date.now() - last < CODEGRAPH_UPGRADE_THROTTLE_MS) return; // checked recently
+    try {
+      fs.mkdirSync(markerDir, { recursive: true });
+      fs.writeFileSync(marker, new Date().toISOString());
+    } catch (_) {}
+    process.stdout.write(
+      `[refacil-sdd-ai] CodeGraph CLI is outdated (v${codegraph.installedVersion()} < ${codegraph.MIN_VERSION}) — ` +
+      'upgrading in background. Restart your session once it finishes.\n',
+    );
+    codegraph.upgrade({ background: true });
+  } catch (_) {
+    // Tolerant — never block session startup
+  }
+}
+
 function checkUpdate() {
   const root = resolveWorkspaceRoot();
 
@@ -596,18 +630,26 @@ function checkUpdate() {
           '[refacil-sdd-ai] CodeGraph is enabled but the CLI is not installed. ' +
           'Run /refacil:update to install and configure it.\n',
         );
-      } else if (!codegraph.isInitialized(root)) {
-        // Not indexed: start automatically in the background, no question needed
-        codegraph.init(root);
-        process.stdout.write('[refacil-sdd-ai] CodeGraph: building index in background (~30s).\n');
-      } else if (codegraph.isStale(root)) {
-        // Index exists but new commits since last init: refresh silently
-        codegraph.init(root);
-        process.stdout.write('[refacil-sdd-ai] CodeGraph: refreshing index (new commits detected).\n');
       } else {
-        // Initialized and up to date. If the timestamp file is absent (index was built
-        // externally, not through our tools), write it now so isStale() has a reference.
-        codegraph.touchTimestamp(root);
+        // Installed: keep the global CLI current. Throttled background upgrade so
+        // existing users move past the version floor without blocking session start.
+        maybeUpgradeCodegraph();
+        if (!codegraph.isInitialized(root)) {
+          // Not indexed: start automatically in the background, no question needed
+          codegraph.init(root);
+          process.stdout.write('[refacil-sdd-ai] CodeGraph: building index in background (~30s).\n');
+        } else if (!codegraph.hasAutoSync() && codegraph.isStale(root)) {
+          // Older codegraph without the daemon file watcher: new commits since
+          // last init → refresh silently ourselves. On WATCHER_VERSION and up the
+          // daemon auto-syncs + catches up on startup, so this branch is skipped
+          // to avoid a redundant double reindex.
+          codegraph.init(root);
+          process.stdout.write('[refacil-sdd-ai] CodeGraph: refreshing index (new commits detected).\n');
+        } else {
+          // Initialized and up to date. If the timestamp file is absent (index was built
+          // externally, not through our tools), write it now so isStale() has a reference.
+          codegraph.touchTimestamp(root);
+        }
       }
     }
   } catch (_) {
@@ -1371,12 +1413,20 @@ switch (command) {
       if (!codegraph.isInstalled()) {
         process.stdout.write('[refacil-sdd-ai] Installing @colbymchenry/codegraph globally...\n');
         try {
-          execSync('npm install -g @colbymchenry/codegraph', { stdio: 'inherit', timeout: 120000 });
+          execSync('npm install -g @colbymchenry/codegraph@latest', { stdio: 'inherit', timeout: 120000 });
           process.stdout.write('[refacil-sdd-ai] @colbymchenry/codegraph installed.\n');
         } catch (err) {
           process.stderr.write(`[refacil-sdd-ai] Failed to install codegraph: ${err.message}\n`);
           process.exit(1);
         }
+      } else if (codegraph.isOutdated()) {
+        // Existing global install is below the version floor — upgrade synchronously
+        // so the rest of setup runs against the new binary.
+        process.stdout.write(
+          `[refacil-sdd-ai] Upgrading @colbymchenry/codegraph (installed v${codegraph.installedVersion()} < ${codegraph.MIN_VERSION})...\n`,
+        );
+        codegraph.upgrade({ background: false });
+        process.stdout.write('[refacil-sdd-ai] @colbymchenry/codegraph upgraded.\n');
       }
       codegraph.registerMcp(selectedIDEs);
       if (!codegraph.isInitialized(projectRoot)) {
