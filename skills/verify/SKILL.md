@@ -25,12 +25,9 @@ Determine the scope before invoking the sub-agent. Prioritize in this order:
 
 - **Default**: `testExecution: none` when `get-memory` has `commandsRun` and `lastStep` is `test` (or later) — verify validates CA/CR **without** re-running the test pipeline.
 
-- **`testExecution: full`** if the user explicitly asked to re-run tests (`full`, `all tests`, `re-run`, `run tests`, `ejecutar tests`, `whole suite`, `suite completa`, `todas`) — then also set `testScope` / `runCoverage` like **`/refacil:test`**:
-  - **`testScope: full`** for whole-suite tokens above.
-  - **`runCoverage: false`** for `no coverage`, `nocoverage`, `skip coverage`, `sin cobertura`, `quick`, `solo tests`.
-  - **`full` + `no coverage`**: `testScope: full`, `runCoverage: false`.
+- **`testExecution: defer`** if the user explicitly asked to re-run the suite (`full`, `all tests`, `re-run`, `run tests`, `ejecutar tests`, `whole suite`, `suite completa`, `todas`): verify does **not** run the suite (rule 0 — that is `/refacil:test`'s job). Tell the user to run `/refacil:test … full` and continue verify with the resulting evidence.
 
-- **No test memory** (`commandsRun` empty): emit WARNING, set `testExecution: full` (CR-01) unless only `changedFiles` allow a minimal scoped run.
+- **No test memory** (`commandsRun` empty): emit WARNING and set `testExecution: defer` (CR-01) — `/refacil:test` is the mandatory prior step; verify reports tests as N/A pending `/refacil:test` instead of running them itself.
 
 Do not invoke the sub-agent with ambiguous scope.
 
@@ -53,17 +50,16 @@ Before invoking the sub-agent, extract the context that the validator would othe
 
 2. **Cross-skill memory** — when `changeName` is known, run `refacil-sdd-ai sdd get-memory <changeName> --json`. Parse `commandsRun`, `criteriaRun`, and `lastStep`. If the output is `{}` or the command fails, omit those fields — do not block verification (CR-04).
 
-3. **Resolve `testExecution`** (§3.2) from Step 0 and memory:
-   - User forced re-run → `testExecution: full`.
-   - `commandsRun` non-empty and `lastStep` is `test` (or `verify`/`review` after test) and user did **not** force re-run → `testExecution: none`.
-   - Otherwise → `testExecution: full` with WARNING (no test phase recorded).
+3. **Resolve `testExecution`** (§3.2 — verify **never** runs the full suite, rule 0):
+   - `commandsRun` non-empty and `lastStep` is `test` (or `verify`/`review` after test) and user did **not** request a re-run → `testExecution: none`.
+   - Re-verify after Step 5 corrections → `testExecution: smoke`.
+   - No test evidence (CR-01), or the user asked to re-run the suite → `testExecution: defer` (verify stops and tells the user to run `/refacil:test` first — it does **not** run the suite itself).
 
-4. **Test commands** — only when `testExecution` is `full` or `smoke`:
-   - **`full`**: follow §3.1 — set `testScope` and `runCoverage` from Step 0; build `testCommand` (scoped from `changedFiles` or baseline if `full`); set `coverageCommand` when `runCoverage: true`.
-   - **`smoke`**: build `smokeTestCommand` for companion tests of `correctionTouchedFiles` only; `runCoverage: false`, `coverageCommand: null`.
-   - **`none`**: omit `testCommand` and `coverageCommand`; set `testsDelegatedFrom: test` and include `commandsRun` for the report.
+4. **Test commands** — only when `testExecution: smoke`:
+   - **`smoke`**: build `smokeTestCommand` for companion tests of `correctionTouchedFiles` **by calling** `refacil-sdd-ai sdd test-scope --files "<correctionTouchedFiles-csv>" --baseline "<§3 baseline>" --no-baseline-fallback` (structurally bounded — empty `testCommand` on fallback). `runCoverage: false`, `coverageCommand: null`.
+   - **`none`** / **`defer`**: omit `testCommand`/`smokeTestCommand` and `coverageCommand`; for `none` set `testsDelegatedFrom: test` and include `commandsRun`; for `defer` instruct the validator to report N/A pending `/refacil:test`.
 
-5. **Coverage command** — only when `testExecution: full` and `runCoverage: true`; otherwise `coverageCommand: null`.
+5. **Coverage command** — verify never runs coverage (that is `/refacil:test`'s job); always `coverageCommand: null`.
 
 6. **CA/CR criteria** — if there is an active change, read the specification in `refacil-sdd/changes/<changeName>/`:
    - `specs.md` if it exists, and/or files under `specs/` (recursively).
@@ -75,12 +71,11 @@ Build the BRIEFING block:
 ```
 BRIEFING:
 changeName: <name or null if scope=git-diff>
-testExecution: none | smoke | full
-testCommand: <required when full; omit when none>
-smokeTestCommand: <required when smoke; omit otherwise>
-testScope: scoped | full
-runCoverage: true | false
-coverageCommand: <project coverage entrypoint or null when full+runCoverage>
+testExecution: none | smoke | defer    # never full — verify does not run the suite (rule 0)
+smokeTestCommand: <required when smoke (scoped via --no-baseline-fallback); omit otherwise>
+testScope: scoped
+runCoverage: false
+coverageCommand: null                  # verify never runs coverage
 testsDelegatedFrom: test | null
 correctionTouchedFiles: [...]   # only on re-verify after Step 5 corrections
 criteria:
@@ -102,7 +97,7 @@ Invoke `refacil-validator` passing it the BRIEFING from the previous step.
 
 The sub-agent:
 - Applies **`testExecution`** from the briefing (§3.2) — **does not** run tests when `none`.
-- When `full`, uses `testCommand` / coverage per §3.1; when `smoke`, runs only `smokeTestCommand` (no coverage).
+- When `smoke`, runs only `smokeTestCommand` (scoped via `--no-baseline-fallback`, no coverage); when `defer`, runs no tests and reports N/A pending `/refacil:test`. Verify never runs the full suite (rule 0).
 - Uses `criteria` from the briefing for verification (without re-reading specs from scratch).
 - Uses `changedFiles` to focus the 3D verification on those files.
 - Applies the **3D framework (Completeness/Correctness/Coherence)** per **`METHODOLOGY-CONTRACT.md §3C — 3C Criterion`** — including the severity table and graceful degradation rule.
@@ -192,7 +187,7 @@ If the command fails, continue silently — it must not block the flow.
    ```
    Corrections applied. Run /refacil:test before the next full verify to refresh the test suite.
    ```
-   **Never** set `testExecution: full` in autofix re-verify unless the user explicitly requested re-run in this invocation.
+   **Never** run the full suite in autofix re-verify — only `smoke` (scoped) or `none`/`defer` (rule 0).
 5. Maximum **2 rounds** of automatic correction. If issues persist, list them for manual correction.
 
 **If the user does not accept:** list the issues for manual correction. Suggest `/refacil:test` then `/refacil:verify`.
@@ -200,7 +195,7 @@ If the command fails, continue silently — it must not block the flow.
 ## Rules
 
 - **Always build the briefing (Step 1) before delegating** — reduces the sub-agent tool calls.
-- **Defaults**: `testExecution: none` when test memory exists; **`testExecution: full`** only when Step 0 forces re-run or CR-01 applies. Smoke only after corrections; never full suite in autofix rounds.
+- **Defaults**: `testExecution: none` when test memory exists; `smoke` (scoped) after corrections; `defer` when there is no evidence or the user wants a re-run (verify never runs the full suite — rule 0). `/refacil:test` owns full regression.
 - **Always delegate to the sub-agent** for the analysis. Do not replicate spec reading or test execution logic here.
 - **Dotfiles in `refacil-sdd/changes/`**: never assert absence of `.review-passed` without `-a`; see §8.
 - **Corrections are ONLY applied by this wrapper** (Step 5), after explicit approval.

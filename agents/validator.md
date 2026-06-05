@@ -36,9 +36,10 @@ If you prefer only the report (without applying fixes), respond with the explici
 
 **BEFORE reading any file or running any command, read this rule.**
 
-- **If the briefing includes `testExecution`**: follow §3.2 — default **`none`** when absent but `commandsRun` is present. Do **not** run Bash tests unless `testExecution` is `full` or `smoke`.
-- **If `testExecution: full`**: use `testCommand` from the briefing — **do not look up the command in `METHODOLOGY-CONTRACT.md`**. Respect `testScope`, `runCoverage`, and `coverageCommand`.
-- **If `testExecution: smoke`**: run **only** `smokeTestCommand` — no coverage.
+- **If the briefing includes `testExecution`**: follow §3.2 — default **`none`** when absent but `commandsRun` is present. Do **not** run Bash tests unless `testExecution` is `smoke`.
+- **Verify NEVER runs the full suite** (`METHODOLOGY-CONTRACT.md §3.1` rule 0): `/refacil:test` is the mandatory prior step that owns full regression. There is no `full` mode here.
+- **If `testExecution: defer`**: do **not** run any tests — there is no current test evidence (CR-01) or the user asked to re-run the suite. Report tests as **N/A (pending `/refacil:test`)** and tell the user to run `/refacil:test` first.
+- **If `testExecution: smoke`**: run **only** `smokeTestCommand` (already scoped via `--no-baseline-fallback`; if empty, SKIP) — no coverage, never the baseline.
 - **If the briefing includes `criteria`**: use it for verification — **do not re-read the specs** to extract the CA/CR again.
 - **If the briefing includes `changedFiles`**: focus the 3D verification on those files — do not do a global discovery.
 - Read ONLY the specific files needed to verify each CA/CR.
@@ -84,7 +85,7 @@ Produce a list of issues with severity `CRITICAL` / `WARNING` / `SUGGESTION`.
 
 ### Step 2: Verify tests (conditional — §3.2)
 
-Read `testExecution` from the briefing (default infer: `none` if `commandsRun` present, else `full`).
+Read `testExecution` from the briefing (default infer: `none` if `commandsRun` present, else `defer` — never `full`; verify does not run the suite, rule 0).
 
 **`testExecution: none`**:
 - **Do not** run `testCommand`, `smokeTestCommand`, or `coverageCommand`.
@@ -93,14 +94,14 @@ Read `testExecution` from the briefing (default infer: `none` if `commandsRun` p
 - JSON `tests.executed: false`, `tests.delegated: true`, `tests.command` = last `commandsRun` or null.
 
 **`testExecution: smoke`**:
-- Run **only** `smokeTestCommand`. Do not run `coverageCommand`.
+- Run **only** `smokeTestCommand` (scoped via `--no-baseline-fallback`; if empty/`fallback`, SKIP only the touched test files). Do not run `coverageCommand`. **Never** run the baseline.
 - FAIL if smoke fails; PASS if smoke passes. Note in report that full suite/coverage requires `/refacil:test`.
 
-**`testExecution: full`**:
-- Run `testCommand` only (already narrowed when `testScope: scoped`). Do not substitute a fuller command.
-- After tests pass, apply coverage per briefing (`runCoverage`, `coverageCommand`, `testScope`) as in §3.1.
+**`testExecution: defer`** (CR-01 — no test evidence, or user asked to re-run the suite):
+- **Do not run any tests.** Verify never runs the full suite (rule 0); `/refacil:test` is the mandatory prior step.
+- Report tests as **N/A (pending `/refacil:test`)**, set `tests.executed: false`, `tests.delegated: true`, and tell the user to run `/refacil:test` before verify.
 
-**If there is NO briefing**: resolve by reading `METHODOLOGY-CONTRACT.md` §3.2 and §3.1; ask user to confirm scope before running tests.
+**If there is NO briefing**: resolve by reading `METHODOLOGY-CONTRACT.md` §3.2 and §3.1; default to `none`/`defer` and ask the user to run `/refacil:test` rather than running the suite here.
 
 ### Step 3: Validate cross-repo ambiguities (optional)
 
@@ -146,7 +147,7 @@ Required corrections (only if REQUIRES_CORRECTIONS):
   "tests": {
     "executed": <bool>,
     "delegated": <bool>,
-    "executionMode": "none" | "smoke" | "full",
+    "executionMode": "none" | "smoke" | "defer",
     "command": "<command or last commandsRun when delegated>",
     "passed": <bool or null when not executed>,
     "total": <int or null>,

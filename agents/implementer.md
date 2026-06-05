@@ -124,9 +124,9 @@ Follow **`METHODOLOGY-CONTRACT.md §3.1`**:
 
 2. **Derive a minimal scoped smoke command** (stack-agnostic — no hardcoded runners):
    ```
-   refacil-sdd-ai sdd test-scope --files <touched-files-csv> --baseline "<testBaselineCommand>"
+   refacil-sdd-ai sdd test-scope --files <touched-files-csv> --baseline "<testBaselineCommand>" --no-baseline-fallback
    ```
-   Use the resulting `testCommand` from the output.
+   Use the resulting `testCommand` from the output. The `--no-baseline-fallback` flag is **mandatory in apply**: on fallback the CLI returns an **empty** `testCommand` (never the full baseline), so you physically cannot run the whole suite — apply NEVER runs full regression. If `testCommand` is empty / `fallback: true`, go to step 4 (run touched test files only, else SKIP).
 
 3. **Run the resulting smoke command.**
 

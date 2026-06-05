@@ -29,7 +29,7 @@ If you prefer to continue here, provide:
   - mode: investigation (only analyze and propose hypotheses) or fix (implement with already-confirmed hypothesis)
   - description: <full bug description>
   - hypothesis: <confirmed root cause> (only for mode=fix)
-  - testScope: scoped \| full (only for mode=fix; default scoped)
+  - testScope: scoped (mode=fix is ALWAYS scoped — rule 0; full regression is /refacil:test's job)
 ```
 
 **Do not proceed with reads or implementation until the scope is clear.**
@@ -163,7 +163,7 @@ Proposed fix for hypothesis #1:
 
 ## Fix mode
 
-The main agent passes you: `mode: fix` + `description` + `hypothesis` (root cause confirmed by the user) + optional **`testScope`** (`scoped` \| `full`, default **`scoped`**).
+The main agent passes you: `mode: fix` + `description` + `hypothesis` (root cause confirmed by the user). Fix mode is **always scoped** (rule 0) — there is no full-suite option in `/refacil:bug`.
 
 ### Step 1: Implement the fix
 
@@ -205,14 +205,19 @@ Create `<projectRoot>/refacil-sdd/changes/<fix-name>/summary.md`:
 
 This file is mandatory for traceability and allows the `check-review` hook to detect the active change. The `.review-passed` will be created by `/refacil:review` upon approval.
 
-### Step 4: Verify tests (`METHODOLOGY-CONTRACT.md` §3.1)
+### Step 4: Verify tests (`METHODOLOGY-CONTRACT.md` §3.1 — always scoped, rule 0)
 
-1. Read **`testScope`** from wrapper (default **`scoped`** if omitted).
-2. **`testScope: full`**: Resolve baseline from **`METHODOLOGY-CONTRACT.md §3`**, run **once unparsed** — **all tests** emitted by that command must pass.
-3. **`testScope: scoped`** (default): Collect **`verificationTargets`** — every production/test file **you edited or added** during fix mode (**including** regression tests created this session).
-   - Build **`scopedCommand`** by narrowing baseline §3 to cover only those roots (directories, `-p`/`-pl`, `--`/path suffixes — follow stack docs + **`AGENTS.md` / `.agents/testing.md`** when present — see §3.1 **Scoped command patterns**).
-   - Run **`scopedCommand`**; everything it selects must pass. **Do not** upgrade to repo-wide invocation while `scoped` unless §3.1 says narrowing is unreliable — then run baseline **once**, prepend report line **WARN: scoped narrowing unavailable → full-suite fallback (heavy)**.
-4. **`testsResult.command`** in JSON must quote the **literal** executed shell string (`scopedCommand` or baseline).
+`/refacil:bug` does **not** pass through `/refacil:test`, so you validate the fix with your **own regression tests** (always in scope) — **never the full suite** (rule 0).
+
+1. Collect **`verificationTargets`** — every production/test file **you edited or added** during fix mode (**including** regression tests created this session).
+2. Derive the scoped command via the CLI (stack-agnostic, structurally bounded):
+   ```
+   refacil-sdd-ai sdd test-scope --files "<verificationTargets-csv>" --baseline "<§3 baseline>" --no-baseline-fallback
+   ```
+   `--no-baseline-fallback` guarantees the CLI **never** returns the full baseline: on fallback `testCommand` is **empty**.
+3. Run the returned `testCommand`; everything it selects must pass.
+4. **Fallback** (empty `testCommand` / `fallback: true`): run **only** the touched files that are themselves test files (your regression tests); if none exist, **SKIP** and prepend report line **WARN: no scopeable tests for touched files → verification deferred**. **Never** run the full repo/package baseline.
+5. **`testsResult.command`** in JSON must quote the **literal** executed shell string (or `null`/empty when SKIPPED).
 
 ### Report + JSON block (fix)
 
@@ -254,5 +259,5 @@ This file is mandatory for traceability and allows the `check-review` hook to de
 - In mode=investigation: follow diagnose loop discipline (reproduce, minimize, hypothesize, validate evidence) before proposing a fix.
 - In mode=fix: the fix must be MINIMAL. Never over-refactor.
 - Regression tests are MANDATORY in mode=fix.
-- **Scoped verification**: default **`testScope: scoped`** from wrapper — narrowed command in Step 4, not wholesale “run entire repo suite” unless `full`.
+- **Scoped verification**: **always scoped** (rule 0) — narrowed command in Step 4 via `sdd test-scope --no-baseline-fallback`, never a wholesale “run entire repo suite”. Full regression belongs to `/refacil:test` or CI.
 - Use **concise** output mode by default.

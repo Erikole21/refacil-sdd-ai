@@ -16,6 +16,7 @@ const {
   findModuleRoot,
   isTestFile,
   affectedComponents,
+  isCodeFileForStack,
 } = require('../lib/test-scope');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'cli.js');
@@ -783,6 +784,158 @@ describe('testScope — monorepo subpackage awareness', () => {
       projectRoot: tmpDir,
     });
     assert.ok(result.fallback, 'planning-only inputs must still produce fallback');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// testScope — noBaselineFallback (apply must never receive the full baseline)
+// ---------------------------------------------------------------------------
+
+describe('testScope — noBaselineFallback', () => {
+  test('fallback returns EMPTY testCommand instead of baseline when noBaselineFallback', () => {
+    // No stack manifest → stack unknown → fallback path
+    const result = testScope({
+      files: ['lib/foo.js'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+      noBaselineFallback: true,
+    });
+    assert.ok(result.fallback, 'should be fallback');
+    assert.equal(result.testCommand, '', 'fallback testCommand must be empty, not the baseline');
+    assert.ok(result.fallbackReason, 'fallbackReason must still explain why');
+  });
+
+  test('markdown-only input returns empty testCommand under noBaselineFallback', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"repo"}');
+    fs.mkdirSync(path.join(tmpDir, 'agents'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'agents', 'implementer.md'), '# implementer');
+
+    const result = testScope({
+      files: ['agents/implementer.md'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+      noBaselineFallback: true,
+    });
+    assert.ok(result.fallback);
+    assert.equal(result.testCommand, '', 'apply must never receive the full suite command');
+  });
+
+  test('normal mode (default) still returns the baseline on fallback', () => {
+    const result = testScope({
+      files: ['lib/foo.js'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+    });
+    assert.ok(result.fallback);
+    assert.equal(result.testCommand, 'npm test', '/refacil:test path keeps the baseline on fallback');
+  });
+
+  test('noBaselineFallback does NOT affect a successful scoped result', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"repo"}');
+    fs.mkdirSync(path.join(tmpDir, 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'lib', 'foo.js'), '// source');
+    fs.writeFileSync(path.join(tmpDir, 'test', 'foo.test.js'), "require('../lib/foo');");
+
+    const result = testScope({
+      files: ['lib/foo.js'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+      noBaselineFallback: true,
+    });
+    assert.ok(!result.fallback, 'a real scope must still narrow');
+    assert.ok(result.testCommand.includes('foo.test.js'));
+  });
+
+  test('CLI --no-baseline-fallback yields empty testCommand on fallback', () => {
+    const r = runTestScope(tmpDir, [
+      '--files', 'lib/foo.js',
+      '--baseline', 'npm test',
+      '--no-baseline-fallback',
+      '--json',
+    ]);
+    assert.equal(r.status, 0);
+    const parsed = JSON.parse(r.stdout.trim());
+    assert.ok(parsed.fallback, 'should be fallback (no stack manifest in tmpDir)');
+    assert.equal(parsed.testCommand, '', 'CLI must emit empty testCommand under --no-baseline-fallback');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isCodeFileForStack — non-code files must not drive test scoping
+// ---------------------------------------------------------------------------
+
+describe('isCodeFileForStack', () => {
+  test('node: .js/.ts/.mjs are code; .md/.json/.yaml are not', () => {
+    assert.ok(isCodeFileForStack('lib/foo.js', 'node'));
+    assert.ok(isCodeFileForStack('lib/foo.ts', 'node'));
+    assert.ok(isCodeFileForStack('lib/foo.mjs', 'node'));
+    assert.ok(!isCodeFileForStack('skills/apply/SKILL.md', 'node'));
+    assert.ok(!isCodeFileForStack('config.json', 'node'));
+  });
+
+  test('python: only .py is code', () => {
+    assert.ok(isCodeFileForStack('src/foo.py', 'python'));
+    assert.ok(!isCodeFileForStack('README.md', 'python'));
+  });
+
+  test('unknown stack → never code', () => {
+    assert.ok(!isCodeFileForStack('foo.js', 'unknown'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// testScope — non-code (markdown) source files must not false-match tests
+// Regression: skill/agent .md docs in a Node repo previously scoped unrelated
+// tests via the loose basename import match (or forced a full-suite fallback).
+// ---------------------------------------------------------------------------
+
+describe('testScope — non-code source files do not false-match tests', () => {
+  test('a markdown file does not scope a test that merely mentions its name', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"repo"}');
+    fs.mkdirSync(path.join(tmpDir, 'agents'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'test'), { recursive: true });
+    // A non-code agent doc whose basename ('implementer') is mentioned by a test
+    fs.writeFileSync(path.join(tmpDir, 'agents', 'implementer.md'), '# implementer agent');
+    fs.writeFileSync(
+      path.join(tmpDir, 'test', 'installer.test.js'),
+      "const agents = ['implementer', 'tester'];\n// unrelated parity test",
+    );
+
+    const result = testScope({
+      files: ['agents/implementer.md'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+    });
+
+    assert.ok(result.fallback, 'a non-code markdown file must not produce a scoped run');
+    assert.equal(result.testCommand, 'npm test');
+    assert.equal(result.files.length, 0, 'no test files should be scoped from a .md input');
+  });
+
+  test('mixed code + markdown: markdown adds no unrelated tests; code still narrows', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"repo"}');
+    fs.mkdirSync(path.join(tmpDir, 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'agents'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'lib', 'foo.js'), '// source');
+    fs.writeFileSync(path.join(tmpDir, 'test', 'foo.test.js'), "require('../lib/foo');");
+    // An agent doc whose basename ('bar') is mentioned by an unrelated test
+    fs.writeFileSync(path.join(tmpDir, 'agents', 'bar.md'), '# bar agent');
+    fs.writeFileSync(path.join(tmpDir, 'test', 'bar.test.js'), "const name = 'bar';");
+
+    const result = testScope({
+      files: ['lib/foo.js', 'agents/bar.md'],
+      baseline: 'npm test',
+      projectRoot: tmpDir,
+    });
+
+    assert.ok(!result.fallback, 'code file must still narrow');
+    assert.ok(result.testCommand.includes('foo.test.js'), 'must scope the code file test');
+    assert.ok(
+      !result.testCommand.includes('bar.test.js'),
+      'markdown basename must not false-match an unrelated test',
+    );
   });
 });
 
